@@ -21,6 +21,7 @@ public:
     void setRuntimeStatus(const FallRuntimeStatus &status);
     void setSocketName(const QString &socketName);
     void publishClassification(const FallClassificationResult &result);
+    void publishClassificationBatch(const FallClassificationBatch &batch);
     void publishEvent(const FallEvent &event);
 
 private:
@@ -29,6 +30,7 @@ private:
     void removeSubscriber(QLocalSocket *socket);
     QByteArray buildStatusResponse() const;
     QByteArray buildClassificationMessage(const FallClassificationResult &result) const;
+    QByteArray buildClassificationBatchMessage(const FallClassificationBatch &batch) const;
     QByteArray buildEventMessage(const FallEvent &event) const;
 
     FallRuntimeStatus status_;

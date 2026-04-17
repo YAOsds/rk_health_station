@@ -4,6 +4,7 @@
 
 #include <QPushButton>
 #include <QtTest/QTest>
+#include <QStringList>
 
 class FakeVideoIpcClient : public AbstractVideoClient {
     Q_OBJECT
@@ -38,8 +39,9 @@ class VideoMonitorPageTest : public QObject {
 
 private slots:
     void showsStatusFieldsAndButtonTransitions();
-    void showsFallClassificationOverlay();
+    void showsMultiPersonClassificationOverlay();
     void showsNoPersonOverlayWhenClassificationGoesStale();
+    void showsNoPersonOverlayForEmptyBatch();
 };
 
 void VideoMonitorPageTest::showsStatusFieldsAndButtonTransitions() {
@@ -63,7 +65,7 @@ void VideoMonitorPageTest::showsStatusFieldsAndButtonTransitions() {
     QVERIFY(!page.stopRecordingButton()->isEnabled());
 }
 
-void VideoMonitorPageTest::showsFallClassificationOverlay() {
+void VideoMonitorPageTest::showsMultiPersonClassificationOverlay() {
     FakeVideoIpcClient client;
     FakeFallIpcClient fallClient;
     VideoMonitorPage page(&client, &fallClient);
@@ -77,14 +79,15 @@ void VideoMonitorPageTest::showsFallClassificationOverlay() {
     emit client.statusReceived(status);
     emit fallClient.connectionChanged(true);
 
-    FallClassificationResult result;
-    result.cameraId = QStringLiteral("front_cam");
-    result.state = QStringLiteral("fall");
-    result.confidence = 0.93;
-    result.timestampMs = 1776359310534;
-    emit fallClient.classificationUpdated(result);
+    FallClassificationBatch batch;
+    batch.cameraId = QStringLiteral("front_cam");
+    batch.timestampMs = 1776359310534;
+    batch.results.push_back({QStringLiteral("stand"), 0.91});
+    batch.results.push_back({QStringLiteral("fall"), 0.96});
+    emit fallClient.classificationBatchUpdated(batch);
 
-    QCOMPARE(page.previewOverlayText(), QStringLiteral("fall 0.93"));
+    QCOMPARE(page.previewOverlayRows(),
+        QStringList({QStringLiteral("stand 0.91"), QStringLiteral("fall 0.96")}));
 }
 
 void VideoMonitorPageTest::showsNoPersonOverlayWhenClassificationGoesStale() {
@@ -101,7 +104,29 @@ void VideoMonitorPageTest::showsNoPersonOverlayWhenClassificationGoesStale() {
     emit client.statusReceived(status);
     emit fallClient.connectionChanged(true);
 
-    QTRY_COMPARE_WITH_TIMEOUT(page.previewOverlayText(), QStringLiteral("no person"), 2500);
+    QTRY_COMPARE_WITH_TIMEOUT(page.previewOverlayRows(), QStringList({QStringLiteral("no person")}), 2500);
+}
+
+void VideoMonitorPageTest::showsNoPersonOverlayForEmptyBatch() {
+    FakeVideoIpcClient client;
+    FakeFallIpcClient fallClient;
+    VideoMonitorPage page(&client, &fallClient);
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.cameraState = VideoCameraState::Previewing;
+    status.previewUrl = QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    emit client.statusReceived(status);
+    emit fallClient.connectionChanged(true);
+
+    FallClassificationBatch batch;
+    batch.cameraId = QStringLiteral("front_cam");
+    batch.timestampMs = 1776359310534;
+    emit fallClient.classificationBatchUpdated(batch);
+
+    QCOMPARE(page.previewOverlayRows(), QStringList({QStringLiteral("no person")}));
 }
 
 QTEST_MAIN(VideoMonitorPageTest)

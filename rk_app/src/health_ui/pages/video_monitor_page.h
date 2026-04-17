@@ -4,6 +4,7 @@
 #include "protocol/video_ipc.h"
 #include "widgets/video_preview_widget.h"
 
+#include <QStringList>
 #include <QWidget>
 
 class AbstractVideoClient;
@@ -25,6 +26,7 @@ public:
     QString cameraStateText() const;
     QString storageDirText() const;
     QString previewOverlayText() const;
+    QStringList previewOverlayRows() const;
     QPushButton *startRecordingButton() const;
     QPushButton *stopRecordingButton() const;
 
@@ -32,6 +34,7 @@ private slots:
     void onStatusReceived(const VideoChannelStatus &status);
     void onCommandFinished(const VideoCommandResult &result);
     void onClassificationUpdated(const FallClassificationResult &result);
+    void onClassificationBatchUpdated(const FallClassificationBatch &batch);
     void onFallConnectionChanged(bool connected);
     void onNoPersonTimeout();
 
@@ -39,6 +42,8 @@ private:
     static constexpr int kNoPersonOverlayTimeoutMs = 1500;
     static QString cameraStateLabel(VideoCameraState state);
     static QString overlayTextForResult(const FallClassificationResult &result);
+    static QVector<VideoPreviewWidget::ClassificationOverlayRow> overlayRowsForBatch(
+        const FallClassificationBatch &batch);
     static VideoPreviewWidget::OverlaySeverity overlaySeverityForState(const QString &state);
     void refreshButtonState(const VideoChannelStatus &status);
     void resetClassificationState();

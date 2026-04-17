@@ -8,6 +8,7 @@ class FallProtocolTest : public QObject {
 private slots:
     void roundTripsRuntimeStatusJson();
     void roundTripsClassificationJson();
+    void roundTripsClassificationBatch();
 };
 
 void FallProtocolTest::roundTripsRuntimeStatusJson() {
@@ -44,6 +45,34 @@ void FallProtocolTest::roundTripsClassificationJson() {
     QCOMPARE(decoded.timestampMs, result.timestampMs);
     QCOMPARE(decoded.state, result.state);
     QCOMPARE(decoded.confidence, result.confidence);
+}
+
+void FallProtocolTest::roundTripsClassificationBatch() {
+    FallClassificationBatch batch;
+    batch.cameraId = QStringLiteral("front_cam");
+    batch.timestampMs = 1776367000000;
+
+    FallClassificationEntry first;
+    first.state = QStringLiteral("stand");
+    first.confidence = 0.91;
+    batch.results.push_back(first);
+
+    FallClassificationEntry second;
+    second.state = QStringLiteral("fall");
+    second.confidence = 0.96;
+    batch.results.push_back(second);
+
+    const QJsonObject json = fallClassificationBatchToJson(batch);
+    QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("classification_batch"));
+    QCOMPARE(json.value(QStringLiteral("person_count")).toInt(), 2);
+
+    FallClassificationBatch decoded;
+    QVERIFY(fallClassificationBatchFromJson(json, &decoded));
+    QCOMPARE(decoded.cameraId, QStringLiteral("front_cam"));
+    QCOMPARE(decoded.results.size(), 2);
+    QCOMPARE(decoded.results.at(0).state, QStringLiteral("stand"));
+    QCOMPARE(decoded.results.at(1).state, QStringLiteral("fall"));
+    QCOMPARE(decoded.results.at(1).confidence, 0.96);
 }
 
 QTEST_MAIN(FallProtocolTest)

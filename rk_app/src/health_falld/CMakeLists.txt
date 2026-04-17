@@ -48,6 +48,9 @@ add_executable(health-falld
     pose/rknn_pose_estimator.h
     pose/pose_estimator.h
     pose/pose_types.h
+    tracking/track_manager.cpp
+    tracking/track_manager.h
+    tracking/tracked_person.h
     runtime/runtime_config.cpp
     runtime/runtime_config.h
 )

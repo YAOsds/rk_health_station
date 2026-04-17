@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QMetaType>
 #include <QString>
+#include <QVector>
 
 enum class AnalysisPixelFormat {
     Jpeg = 0,
@@ -62,5 +63,17 @@ struct FallClassificationResult {
     double confidence = 0.0;
 };
 
+struct FallClassificationEntry {
+    QString state;
+    double confidence = 0.0;
+};
+
+struct FallClassificationBatch {
+    QString cameraId;
+    qint64 timestampMs = 0;
+    QVector<FallClassificationEntry> results;
+};
+
 Q_DECLARE_METATYPE(AnalysisFramePacket)
 Q_DECLARE_METATYPE(FallClassificationResult)
+Q_DECLARE_METATYPE(FallClassificationBatch)

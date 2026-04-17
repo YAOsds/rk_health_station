@@ -1,5 +1,7 @@
 #include "protocol/fall_ipc.h"
 
+#include <QJsonArray>
+
 QJsonObject fallRuntimeStatusToJson(const FallRuntimeStatus &status) {
     QJsonObject json;
     json.insert(QStringLiteral("camera_id"), status.cameraId);
@@ -55,6 +57,50 @@ bool fallClassificationResultFromJson(const QJsonObject &json, FallClassificatio
     return json.value(QStringLiteral("type")).toString() == QStringLiteral("classification")
         && !result->cameraId.isEmpty()
         && !result->state.isEmpty();
+}
+
+QJsonObject fallClassificationBatchToJson(const FallClassificationBatch &batch) {
+    QJsonArray results;
+    for (const FallClassificationEntry &entry : batch.results) {
+        QJsonObject item;
+        item.insert(QStringLiteral("state"), entry.state);
+        item.insert(QStringLiteral("confidence"), entry.confidence);
+        results.append(item);
+    }
+
+    QJsonObject json;
+    json.insert(QStringLiteral("type"), QStringLiteral("classification_batch"));
+    json.insert(QStringLiteral("camera_id"), batch.cameraId);
+    json.insert(QStringLiteral("ts"), static_cast<qint64>(batch.timestampMs));
+    json.insert(QStringLiteral("person_count"), batch.results.size());
+    json.insert(QStringLiteral("results"), results);
+    return json;
+}
+
+bool fallClassificationBatchFromJson(const QJsonObject &json, FallClassificationBatch *batch) {
+    if (!batch) {
+        return false;
+    }
+
+    batch->cameraId = json.value(QStringLiteral("camera_id")).toString();
+    batch->timestampMs = static_cast<qint64>(json.value(QStringLiteral("ts")).toDouble());
+    batch->results.clear();
+
+    const QJsonArray results = json.value(QStringLiteral("results")).toArray();
+    for (const QJsonValue &value : results) {
+        const QJsonObject object = value.toObject();
+        FallClassificationEntry entry;
+        entry.state = object.value(QStringLiteral("state")).toString();
+        entry.confidence = object.value(QStringLiteral("confidence")).toDouble();
+        if (entry.state.isEmpty()) {
+            return false;
+        }
+        batch->results.push_back(entry);
+    }
+
+    return json.value(QStringLiteral("type")).toString() == QStringLiteral("classification_batch")
+        && !batch->cameraId.isEmpty()
+        && json.value(QStringLiteral("person_count")).toInt() == batch->results.size();
 }
 
 QJsonObject fallEventToJson(const FallEvent &event) {

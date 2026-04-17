@@ -1,13 +1,13 @@
 #include "app/fall_daemon_app.h"
 
 #include "action/action_classifier_factory.h"
-#include "action/target_selector.h"
 #include "ingest/analysis_stream_client.h"
 #include "ipc/fall_gateway.h"
 #include "pose/rknn_pose_estimator.h"
 
 #include <QDateTime>
 #include <QDebug>
+#include <QStringList>
 
 #include <memory>
 
@@ -21,8 +21,7 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
     , poseEstimator_(std::move(poseEstimator))
     , actionClassifier_(createActionClassifier(config_))
     , detectorService_(actionClassifier_.get())
-    , sequenceBuffer_(config_.sequenceLength)
-    , targetSelector_(std::make_unique<TargetSelector>())
+    , trackManager_(5, 10)
     , ingestClient_(new AnalysisStreamClient(config_.analysisSocketPath, this))
     , gateway_(new FallGateway(FallRuntimeStatus(), this)) {
     connect(ingestClient_, &AnalysisStreamClient::statusChanged, this, [this](bool connected) {
@@ -36,7 +35,7 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
             const QVector<PosePerson> people = poseEstimator_->infer(frame, &error);
             runtimeStatus_.lastInferTs = QDateTime::currentMSecsSinceEpoch();
             if (!error.isEmpty()) {
-                sequenceBuffer_.clear();
+                trackManager_.clear();
                 runtimeStatus_.lastError = error;
                 runtimeStatus_.latestState = QStringLiteral("monitoring");
                 runtimeStatus_.latestConfidence = 0.0;
@@ -45,54 +44,53 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
             }
 
             runtimeStatus_.lastError.clear();
-            if (people.isEmpty()) {
-                sequenceBuffer_.clear();
+            const QVector<TrackedPerson> tracks =
+                trackManager_.update(people, runtimeStatus_.lastInferTs);
+            if (tracks.isEmpty()) {
                 runtimeStatus_.latestState = QStringLiteral("monitoring");
                 runtimeStatus_.latestConfidence = 0.0;
+                FallClassificationBatch batch;
+                batch.cameraId = config_.cameraId;
+                batch.timestampMs = runtimeStatus_.lastInferTs;
+                gateway_->publishClassificationBatch(batch);
                 gateway_->setRuntimeStatus(runtimeStatus_);
                 return;
             }
 
-            const PosePerson primaryPerson = targetSelector_->selectPrimary(people);
-            if (primaryPerson.keypoints.size() < 17) {
-                sequenceBuffer_.clear();
-                runtimeStatus_.latestState = QStringLiteral("monitoring");
-                runtimeStatus_.latestConfidence = 0.0;
-                gateway_->setRuntimeStatus(runtimeStatus_);
-                return;
-            }
+            FallClassificationBatch batch;
+            batch.cameraId = config_.cameraId;
+            batch.timestampMs = runtimeStatus_.lastInferTs;
 
-            sequenceBuffer_.push(primaryPerson);
-            if (!sequenceBuffer_.isFull()) {
-                runtimeStatus_.latestState = QStringLiteral("monitoring");
-                runtimeStatus_.latestConfidence = 0.0;
-                gateway_->setRuntimeStatus(runtimeStatus_);
-                return;
-            }
+            double highestConfidence = 0.0;
+            QString highestState = QStringLiteral("monitoring");
 
-            const FallDetectorResult result = detectorService_.update(sequenceBuffer_.values(), &error);
-            if (!error.isEmpty()) {
-                runtimeStatus_.lastError = error;
-                runtimeStatus_.latestState = QStringLiteral("monitoring");
-                runtimeStatus_.latestConfidence = 0.0;
-            } else {
-                runtimeStatus_.lastError.clear();
-                runtimeStatus_.latestState = result.state;
-                runtimeStatus_.latestConfidence = result.confidence;
-                if (result.hasClassification) {
-                    FallClassificationResult classification;
-                    classification.cameraId = config_.cameraId;
-                    classification.timestampMs = runtimeStatus_.lastInferTs;
-                    classification.state = result.classificationState;
-                    classification.confidence = result.classificationConfidence;
-                    gateway_->publishClassification(classification);
-                    qInfo().noquote()
-                        << QStringLiteral("classification camera=%1 state=%2 confidence=%3 ts=%4")
-                               .arg(classification.cameraId)
-                               .arg(classification.state)
-                               .arg(QString::number(classification.confidence, 'f', 3))
-                               .arg(classification.timestampMs);
+            for (const TrackedPerson &track : tracks) {
+                if (track.missCount > 0 || track.latestPose.keypoints.size() < 17
+                    || !track.sequence.isFull()) {
+                    continue;
                 }
+
+                QString classifyError;
+                const FallDetectorResult result =
+                    detectorService_.update(track.sequence.values(), &classifyError);
+                if (!classifyError.isEmpty()) {
+                    runtimeStatus_.lastError = classifyError;
+                    continue;
+                }
+                if (!result.hasClassification) {
+                    continue;
+                }
+
+                FallClassificationEntry entry;
+                entry.state = result.classificationState;
+                entry.confidence = result.classificationConfidence;
+                batch.results.push_back(entry);
+
+                if (entry.confidence >= highestConfidence) {
+                    highestConfidence = entry.confidence;
+                    highestState = entry.state;
+                }
+
                 if (result.event.has_value()) {
                     FallEvent event = *result.event;
                     event.cameraId = config_.cameraId;
@@ -106,6 +104,39 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                                .arg(event.tsConfirm);
                 }
             }
+
+            runtimeStatus_.latestState = batch.results.isEmpty() ? QStringLiteral("monitoring") : highestState;
+            runtimeStatus_.latestConfidence = highestConfidence;
+
+            if (batch.results.size() == 1) {
+                FallClassificationResult classification;
+                classification.cameraId = config_.cameraId;
+                classification.timestampMs = runtimeStatus_.lastInferTs;
+                classification.state = batch.results.first().state;
+                classification.confidence = batch.results.first().confidence;
+                gateway_->publishClassification(classification);
+                qInfo().noquote()
+                    << QStringLiteral("classification camera=%1 state=%2 confidence=%3 ts=%4")
+                           .arg(classification.cameraId)
+                           .arg(classification.state)
+                           .arg(QString::number(classification.confidence, 'f', 3))
+                           .arg(classification.timestampMs);
+            } else if (!batch.results.isEmpty()) {
+                gateway_->publishClassificationBatch(batch);
+                QStringList states;
+                for (const FallClassificationEntry &entry : batch.results) {
+                    states.push_back(QStringLiteral("%1:%2")
+                                         .arg(entry.state)
+                                         .arg(QString::number(entry.confidence, 'f', 2)));
+                }
+                qInfo().noquote()
+                    << QStringLiteral("classification_batch camera=%1 count=%2 states=[%3] ts=%4")
+                           .arg(batch.cameraId)
+                           .arg(batch.results.size())
+                           .arg(states.join(','))
+                           .arg(batch.timestampMs);
+            }
+
             gateway_->setRuntimeStatus(runtimeStatus_);
         });
 }

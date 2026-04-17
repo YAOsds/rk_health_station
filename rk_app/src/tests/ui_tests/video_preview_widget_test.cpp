@@ -6,24 +6,31 @@ class VideoPreviewWidgetTest : public QObject {
     Q_OBJECT
 
 private slots:
-    void rendersFallOverlayText();
-    void rendersNoPersonOverlayText();
+    void rendersMultipleClassificationRows();
+    void rendersNoPersonRow();
 };
 
-void VideoPreviewWidgetTest::rendersFallOverlayText() {
+void VideoPreviewWidgetTest::rendersMultipleClassificationRows() {
     VideoPreviewWidget widget;
-    widget.setClassificationOverlay(
-        QStringLiteral("fall 0.93"),
-        VideoPreviewWidget::OverlaySeverity::Alert);
-    QCOMPARE(widget.classificationText(), QStringLiteral("fall 0.93"));
+
+    QVector<VideoPreviewWidget::ClassificationOverlayRow> rows;
+    rows.push_back({QStringLiteral("stand 0.91"), VideoPreviewWidget::OverlaySeverity::Normal});
+    rows.push_back({QStringLiteral("fall 0.96"), VideoPreviewWidget::OverlaySeverity::Alert});
+
+    widget.setClassificationRows(rows);
+
+    QCOMPARE(widget.classificationRows(),
+        QStringList({QStringLiteral("stand 0.91"), QStringLiteral("fall 0.96")}));
 }
 
-void VideoPreviewWidgetTest::rendersNoPersonOverlayText() {
+void VideoPreviewWidgetTest::rendersNoPersonRow() {
     VideoPreviewWidget widget;
-    widget.setClassificationOverlay(
-        QStringLiteral("no person"),
-        VideoPreviewWidget::OverlaySeverity::Muted);
-    QCOMPARE(widget.classificationText(), QStringLiteral("no person"));
+    QVector<VideoPreviewWidget::ClassificationOverlayRow> rows;
+    rows.push_back({QStringLiteral("no person"), VideoPreviewWidget::OverlaySeverity::Muted});
+
+    widget.setClassificationRows(rows);
+
+    QCOMPARE(widget.classificationRows(), QStringList({QStringLiteral("no person")}));
 }
 
 QTEST_MAIN(VideoPreviewWidgetTest)

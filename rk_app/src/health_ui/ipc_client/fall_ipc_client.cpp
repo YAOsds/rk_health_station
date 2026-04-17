@@ -15,6 +15,7 @@ FallIpcClient::FallIpcClient(const QString &socketName, QObject *parent)
     , socketName_(socketName)
     , socket_(new QLocalSocket(this)) {
     qRegisterMetaType<FallClassificationResult>("FallClassificationResult");
+    qRegisterMetaType<FallClassificationBatch>("FallClassificationBatch");
     connect(socket_, &QLocalSocket::readyRead, this, [this]() { onReadyRead(); });
     connect(socket_, &QLocalSocket::connected, this, [this]() {
         emit connectionChanged(true);
@@ -66,8 +67,12 @@ void FallIpcClient::onReadyRead() {
         }
 
         const QJsonDocument document = QJsonDocument::fromJson(line);
+        FallClassificationBatch batch;
         FallClassificationResult result;
-        if (document.isObject() && fallClassificationResultFromJson(document.object(), &result)) {
+        if (document.isObject() && fallClassificationBatchFromJson(document.object(), &batch)) {
+            emit classificationBatchUpdated(batch);
+        } else if (document.isObject()
+            && fallClassificationResultFromJson(document.object(), &result)) {
             emit classificationUpdated(result);
         }
     }

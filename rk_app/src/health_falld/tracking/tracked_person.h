@@ -2,13 +2,18 @@
 
 #include "action/sequence_buffer.h"
 #include "pose/pose_types.h"
+#include "tracking/byte_track_state.h"
 
 #include <QString>
 
 struct TrackedPerson {
     int trackId = -1;
+    ByteTrackState state = ByteTrackState::Tracked;
+    QRectF predictedBox;
     PosePerson latestPose;
     qint64 lastUpdateTs = 0;
+    qint64 lostSinceTs = 0;
+    int hitCount = 0;
     int missCount = 0;
     SequenceBuffer<PosePerson> sequence;
     QString lastClassificationState = QStringLiteral("monitoring");

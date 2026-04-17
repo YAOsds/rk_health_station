@@ -822,6 +822,7 @@ add_executable(fall_end_to_end_status_test
     ../health_falld/ingest/analysis_stream_client.cpp
     ../health_falld/ipc/fall_gateway.cpp
     ../health_falld/pose/rknn_pose_estimator.cpp
+    ../health_falld/tracking/track_manager.cpp
     ../health_falld/runtime/runtime_config.cpp
 )
 

@@ -53,6 +53,20 @@ void FallGateway::publishClassification(const FallClassificationResult &result) 
     }
 }
 
+void FallGateway::publishClassificationBatch(const FallClassificationBatch &batch) {
+    const QByteArray message = buildClassificationBatchMessage(batch);
+    for (int index = classificationSubscribers_.size() - 1; index >= 0; --index) {
+        QLocalSocket *socket = classificationSubscribers_.at(index).data();
+        if (!socket || socket->state() != QLocalSocket::ConnectedState) {
+            classificationSubscribers_.removeAt(index);
+            continue;
+        }
+
+        socket->write(message);
+        socket->flush();
+    }
+}
+
 void FallGateway::publishEvent(const FallEvent &event) {
     const QByteArray message = buildEventMessage(event);
     for (int index = classificationSubscribers_.size() - 1; index >= 0; --index) {
@@ -118,6 +132,13 @@ QByteArray FallGateway::buildStatusResponse() const {
 QByteArray FallGateway::buildClassificationMessage(const FallClassificationResult &result) const {
     QByteArray payload =
         QJsonDocument(fallClassificationResultToJson(result)).toJson(QJsonDocument::Compact);
+    payload.append('\n');
+    return payload;
+}
+
+QByteArray FallGateway::buildClassificationBatchMessage(const FallClassificationBatch &batch) const {
+    QByteArray payload =
+        QJsonDocument(fallClassificationBatchToJson(batch)).toJson(QJsonDocument::Compact);
     payload.append('\n');
     return payload;
 }

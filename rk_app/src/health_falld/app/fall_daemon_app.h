@@ -1,12 +1,11 @@
 #pragma once
 
-#include "action/sequence_buffer.h"
-#include "action/target_selector.h"
 #include "domain/fall_detector_service.h"
 #include "models/fall_models.h"
 #include "pose/pose_estimator.h"
 #include "pose/pose_types.h"
 #include "runtime/runtime_config.h"
+#include "tracking/track_manager.h"
 
 #include <memory>
 #include <QObject>
@@ -30,8 +29,7 @@ private:
     std::unique_ptr<PoseEstimator> poseEstimator_;
     std::unique_ptr<ActionClassifier> actionClassifier_;
     FallDetectorService detectorService_;
-    SequenceBuffer<PosePerson> sequenceBuffer_;
-    std::unique_ptr<TargetSelector> targetSelector_;
+    TrackManager trackManager_;
     AnalysisStreamClient *ingestClient_ = nullptr;
     FallGateway *gateway_ = nullptr;
 };

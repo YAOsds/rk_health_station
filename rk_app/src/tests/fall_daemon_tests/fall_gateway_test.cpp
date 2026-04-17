@@ -12,6 +12,7 @@ class FallGatewayTest : public QObject {
 private slots:
     void returnsRuntimeStatus();
     void pushesClassificationToSubscribers();
+    void broadcastsClassificationBatchToSubscribers();
 };
 
 void FallGatewayTest::returnsRuntimeStatus() {
@@ -66,6 +67,37 @@ void FallGatewayTest::pushesClassificationToSubscribers() {
     const QJsonObject json = QJsonDocument::fromJson(subscriber.readAll().trimmed()).object();
     QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("classification"));
     QCOMPARE(json.value(QStringLiteral("state")).toString(), QStringLiteral("fall"));
+
+    gateway.stop();
+}
+
+void FallGatewayTest::broadcastsClassificationBatchToSubscribers() {
+    const QString socketName = QStringLiteral("/tmp/rk_fall_gateway_batch_test.sock");
+    QLocalServer::removeServer(socketName);
+
+    FallGateway gateway{FallRuntimeStatus()};
+    gateway.setSocketName(socketName);
+    QVERIFY(gateway.start());
+
+    QLocalSocket subscriber;
+    subscriber.connectToServer(socketName);
+    QVERIFY(subscriber.waitForConnected(2000));
+    subscriber.write("{\"action\":\"subscribe_classification\"}\n");
+    subscriber.flush();
+    QTest::qWait(50);
+
+    FallClassificationBatch batch;
+    batch.cameraId = QStringLiteral("front_cam");
+    batch.timestampMs = 1776367000000;
+    batch.results.push_back({QStringLiteral("stand"), 0.91});
+    batch.results.push_back({QStringLiteral("fall"), 0.96});
+
+    gateway.publishClassificationBatch(batch);
+
+    QTRY_VERIFY_WITH_TIMEOUT(subscriber.bytesAvailable() > 0 || subscriber.waitForReadyRead(50), 2000);
+    const QJsonObject json = QJsonDocument::fromJson(subscriber.readAll().trimmed()).object();
+    QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("classification_batch"));
+    QCOMPARE(json.value(QStringLiteral("person_count")).toInt(), 2);
 
     gateway.stop();
 }

@@ -22,6 +22,7 @@ QVector<TrackedPerson> TrackManager::update(
             track.latestPose = detection;
             track.lastUpdateTs = timestampMs;
             track.missCount = 0;
+            track.sequence.push(detection);
             matched[bestIndex] = true;
             continue;
         }
@@ -34,6 +35,7 @@ QVector<TrackedPerson> TrackManager::update(
         track.trackId = nextTrackId_++;
         track.latestPose = detection;
         track.lastUpdateTs = timestampMs;
+        track.sequence.push(detection);
         tracks_.push_back(track);
         matched.push_back(true);
     }

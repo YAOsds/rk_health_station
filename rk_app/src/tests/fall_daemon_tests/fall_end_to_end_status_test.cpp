@@ -17,6 +17,7 @@ private slots:
     void updatesInferTimestampAfterFrameArrives();
     void startsWithRuleBackendWhenConfiguredExplicitly();
     void streamsClassificationAfterWindowFills();
+    void streamsClassificationBatchForMultiplePeople();
 };
 
 class SinglePoseEstimator : public PoseEstimator {
@@ -45,6 +46,46 @@ public:
         }
         person.box = QRectF(80.0, 120.0, 120.0, 240.0);
         return {person};
+    }
+};
+
+class MultiPoseEstimatorStub : public PoseEstimator {
+public:
+    bool loadModel(const QString &path, QString *error) override {
+        Q_UNUSED(path);
+        if (error) {
+            error->clear();
+        }
+        return true;
+    }
+
+    QVector<PosePerson> infer(const AnalysisFramePacket &frame, QString *error) override {
+        Q_UNUSED(frame);
+        if (error) {
+            error->clear();
+        }
+
+        PosePerson left;
+        left.score = 0.95f;
+        left.box = QRectF(40.0, 120.0, 120.0, 240.0);
+        left.keypoints.resize(17);
+        for (int index = 0; index < left.keypoints.size(); ++index) {
+            left.keypoints[index].x = 90.0 + index;
+            left.keypoints[index].y = 210.0 + index;
+            left.keypoints[index].score = 0.9f;
+        }
+
+        PosePerson right;
+        right.score = 0.93f;
+        right.box = QRectF(280.0, 130.0, 120.0, 240.0);
+        right.keypoints.resize(17);
+        for (int index = 0; index < right.keypoints.size(); ++index) {
+            right.keypoints[index].x = 320.0 + index;
+            right.keypoints[index].y = 220.0 + index;
+            right.keypoints[index].score = 0.88f;
+        }
+
+        return {left, right};
     }
 };
 
@@ -210,6 +251,47 @@ void FallEndToEndStatusTest::streamsClassificationAfterWindowFills() {
     const QJsonObject json = QJsonDocument::fromJson(subscriber.readAll().trimmed()).object();
     QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("classification"));
     QVERIFY(!json.value(QStringLiteral("state")).toString().isEmpty());
+
+    qunsetenv("RK_FALL_SOCKET_NAME");
+    qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");
+}
+
+void FallEndToEndStatusTest::streamsClassificationBatchForMultiplePeople() {
+    QLocalServer analysisServer;
+    QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_e2e_multi.sock"));
+    QVERIFY(analysisServer.listen(QStringLiteral("/tmp/rk_video_analysis_e2e_multi.sock")));
+
+    qputenv("RK_FALL_SOCKET_NAME", QByteArray("/tmp/rk_fall_e2e_multi.sock"));
+    qputenv("RK_VIDEO_ANALYSIS_SOCKET_PATH", QByteArray("/tmp/rk_video_analysis_e2e_multi.sock"));
+
+    FallDaemonApp app(std::make_unique<MultiPoseEstimatorStub>());
+    QVERIFY(app.start());
+    QVERIFY(analysisServer.waitForNewConnection(2000));
+    QLocalSocket *analysisSocket = analysisServer.nextPendingConnection();
+    QVERIFY(analysisSocket != nullptr);
+
+    QLocalSocket subscriber;
+    subscriber.connectToServer(QStringLiteral("/tmp/rk_fall_e2e_multi.sock"));
+    QVERIFY(subscriber.waitForConnected(2000));
+    subscriber.write("{\"action\":\"subscribe_classification\"}\n");
+    subscriber.flush();
+    QTest::qWait(50);
+
+    for (quint64 frameId = 1; frameId <= 45; ++frameId) {
+        AnalysisFramePacket packet;
+        packet.frameId = frameId;
+        packet.cameraId = QStringLiteral("front_cam");
+        packet.width = 640;
+        packet.height = 640;
+        packet.payload = QByteArray("jpeg-bytes");
+        analysisSocket->write(encodeAnalysisFramePacket(packet));
+        analysisSocket->flush();
+    }
+
+    QTRY_VERIFY_WITH_TIMEOUT(subscriber.bytesAvailable() > 0 || subscriber.waitForReadyRead(50), 2000);
+    const QJsonObject json = QJsonDocument::fromJson(subscriber.readAll().trimmed()).object();
+    QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("classification_batch"));
+    QVERIFY(json.value(QStringLiteral("person_count")).toInt() >= 2);
 
     qunsetenv("RK_FALL_SOCKET_NAME");
     qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");

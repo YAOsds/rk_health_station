@@ -1,0 +1,66 @@
+# Build outputs
+/out/
+/build/
+/cmake-build-*/
+**/build/
+**/cmake-build-*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/Makefile
+**/compile_commands.json
+
+# Compiled objects and libraries
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# Qt generated files
+*.moc
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*.qrc.depends
+.qmake.stash
+*.pro.user
+*.pro.user.*
+*.user
+
+# Runtime data and logs
+**/logs/
+**/run/
+**/tmp/
+**/*.log
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/*.db-journal
+**/*.db-shm
+**/*.db-wal
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Local environments
+.env
+.env.*
+.venv/
+venv/
+
+# IDE settings
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,16 @@
+[Unit]
+Description=RK Health Station UI
+After=healthd.service graphical.target
+Requires=healthd.service
+
+[Service]
+Type=simple
+WorkingDirectory=/var/lib/rk_health_station
+Environment=RK_HEALTH_STATION_SOCKET_NAME=/tmp/rk_health_station.sock
+ExecStart=/usr/local/bin/health-ui
+Restart=always
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target

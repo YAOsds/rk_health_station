@@ -1,0 +1,37 @@
+cmake_minimum_required(VERSION 3.16)
+
+project(rk_health_station LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Qt6 QUIET COMPONENTS Core)
+if(TARGET Qt6::Core)
+    set(RK_QT_MAJOR 6)
+    set(RK_QT_CORE_TARGET Qt6::Core)
+else()
+    find_package(Qt5 REQUIRED COMPONENTS Core)
+    set(RK_QT_MAJOR 5)
+    set(RK_QT_CORE_TARGET Qt5::Core)
+endif()
+
+include(CTest)
+
+if(BUILD_TESTING)
+    if(RK_QT_MAJOR EQUAL 6)
+        find_package(Qt6 REQUIRED COMPONENTS Test)
+        set(RK_QT_TEST_TARGET Qt6::Test)
+    else()
+        find_package(Qt5 REQUIRED COMPONENTS Test)
+        set(RK_QT_TEST_TARGET Qt5::Test)
+    endif()
+endif()
+
+add_subdirectory(src/shared)
+add_subdirectory(src/healthd)
+add_subdirectory(src/health_ui)
+add_subdirectory(src/health_videod)
+add_subdirectory(src/health_falld)
+if(BUILD_TESTING)
+    add_subdirectory(src/tests)
+endif()

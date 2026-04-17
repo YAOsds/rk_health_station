@@ -6,6 +6,11 @@ FallDetectorService::FallDetectorService(ActionClassifier *classifier)
 
 FallDetectorResult FallDetectorService::update(
     const QVector<PosePerson> &sequence, QString *error) {
+    return update(sequence, nullptr, error);
+}
+
+FallDetectorResult FallDetectorService::update(
+    const QVector<PosePerson> &sequence, FallEventPolicy *policy, QString *error) {
     FallDetectorResult result;
     if (!classifier_) {
         if (error) {
@@ -24,6 +29,8 @@ FallDetectorResult FallDetectorService::update(
     result.hasClassification = true;
     result.classificationState = classification.label;
     result.classificationConfidence = classification.confidence;
-    result.event = policy_.update(classification.label, classification.confidence);
+    if (policy) {
+        result.event = policy->update(classification.label, classification.confidence);
+    }
     return result;
 }

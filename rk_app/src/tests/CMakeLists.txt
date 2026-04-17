@@ -145,6 +145,29 @@ target_link_libraries(byte_tracker_test PRIVATE
 
 add_test(NAME byte_tracker_test COMMAND byte_tracker_test)
 
+add_executable(track_action_context_test
+    fall_daemon_tests/track_action_context_test.cpp
+    ../health_falld/domain/fall_event_policy.cpp
+)
+
+set_target_properties(track_action_context_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(track_action_context_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(track_action_context_test PRIVATE
+    rk_shared
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME track_action_context_test COMMAND track_action_context_test)
+
 add_executable(protocol_codec_test
     protocol_tests/protocol_codec_test.cpp
 )

@@ -16,3 +16,11 @@ std::optional<FallEvent> FallEventPolicy::update(const QString &rawState, double
     event.confidence = confidence;
     return event;
 }
+
+void FallEventPolicy::reset() {
+    fallLikeCount_ = 0;
+}
+
+int FallEventPolicy::fallLikeCount() const {
+    return fallLikeCount_;
+}

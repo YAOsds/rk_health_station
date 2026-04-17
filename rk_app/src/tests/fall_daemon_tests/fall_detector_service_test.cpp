@@ -41,6 +41,7 @@ class FallDetectorServiceTest : public QObject {
 
 private slots:
     void confirmsEventAfterRepeatedFallLikeStates();
+    void doesNotRepeatConfirmedEventWithoutRecovery();
 };
 
 void FallDetectorServiceTest::confirmsEventAfterRepeatedFallLikeStates() {
@@ -52,28 +53,49 @@ void FallDetectorServiceTest::confirmsEventAfterRepeatedFallLikeStates() {
     };
 
     FallDetectorService service(&classifier);
+    FallEventPolicy policy;
     QString error;
 
     const QVector<PosePerson> sequence = makeSequence();
-    const FallDetectorResult first = service.update(sequence, &error);
+    const FallDetectorResult first = service.update(sequence, &policy, &error);
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(classifier.lastSequenceLength, 45);
     QCOMPARE(first.state, QStringLiteral("fall"));
     QCOMPARE(first.confidence, 0.91);
     QVERIFY(!first.event.has_value());
 
-    const FallDetectorResult second = service.update(sequence, &error);
+    const FallDetectorResult second = service.update(sequence, &policy, &error);
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(second.state, QStringLiteral("lie"));
     QCOMPARE(second.confidence, 0.93);
     QVERIFY(!second.event.has_value());
 
-    const FallDetectorResult third = service.update(sequence, &error);
+    const FallDetectorResult third = service.update(sequence, &policy, &error);
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(third.state, QStringLiteral("lie"));
     QCOMPARE(third.confidence, 0.95);
     QVERIFY(third.event.has_value());
     QCOMPARE(third.event->eventType, QStringLiteral("fall_confirmed"));
+}
+
+void FallDetectorServiceTest::doesNotRepeatConfirmedEventWithoutRecovery() {
+    FakeActionClassifier classifier;
+    classifier.responses = {
+        {QStringLiteral("fall"), 0.91},
+        {QStringLiteral("lie"), 0.93},
+        {QStringLiteral("lie"), 0.95},
+        {QStringLiteral("fall"), 0.96},
+    };
+
+    FallDetectorService service(&classifier);
+    FallEventPolicy policy;
+    QString error;
+
+    const QVector<PosePerson> sequence = makeSequence();
+    QVERIFY(!service.update(sequence, &policy, &error).event.has_value());
+    QVERIFY(!service.update(sequence, &policy, &error).event.has_value());
+    QVERIFY(service.update(sequence, &policy, &error).event.has_value());
+    QVERIFY(!service.update(sequence, &policy, &error).event.has_value());
 }
 
 QTEST_MAIN(FallDetectorServiceTest)

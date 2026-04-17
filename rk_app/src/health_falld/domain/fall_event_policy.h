@@ -12,4 +12,5 @@ public:
 
 private:
     int fallLikeCount_ = 0;
+    bool eventEmittedForCurrentEpisode_ = false;
 };

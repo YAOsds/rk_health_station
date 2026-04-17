@@ -121,6 +121,30 @@ target_link_libraries(association_test PRIVATE
 
 add_test(NAME association_test COMMAND association_test)
 
+add_executable(byte_tracker_test
+    fall_daemon_tests/byte_tracker_test.cpp
+    ../health_falld/tracking/association.cpp
+    ../health_falld/tracking/byte_tracker.cpp
+    ../health_falld/tracking/kalman_filter.cpp
+    ../health_falld/runtime/runtime_config.cpp
+)
+
+set_target_properties(byte_tracker_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(byte_tracker_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+)
+
+target_link_libraries(byte_tracker_test PRIVATE
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME byte_tracker_test COMMAND byte_tracker_test)
+
 add_executable(protocol_codec_test
     protocol_tests/protocol_codec_test.cpp
 )

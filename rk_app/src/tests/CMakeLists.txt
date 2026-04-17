@@ -100,6 +100,27 @@ target_link_libraries(action_classifier_factory_test PRIVATE
 
 add_test(NAME action_classifier_factory_test COMMAND action_classifier_factory_test)
 
+add_executable(association_test
+    fall_daemon_tests/association_test.cpp
+    ../health_falld/tracking/association.cpp
+)
+
+set_target_properties(association_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(association_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+)
+
+target_link_libraries(association_test PRIVATE
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME association_test COMMAND association_test)
+
 add_executable(protocol_codec_test
     protocol_tests/protocol_codec_test.cpp
 )

@@ -8,8 +8,8 @@ class ByteTracker {
 public:
     explicit ByteTracker(const FallRuntimeConfig &config);
 
-    QVector<TrackedPerson> update(const QVector<PosePerson> &detections, qint64 timestampMs);
-    QVector<TrackedPerson> activeTracks() const;
+    QVector<TrackedPerson> &update(const QVector<PosePerson> &detections, qint64 timestampMs);
+    const QVector<TrackedPerson> &activeTracks() const;
     void clear();
 
 private:

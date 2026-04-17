@@ -34,6 +34,9 @@ class ByteTrackerTest : public QObject {
 
 private slots:
     void keepsStableIdsAcrossSmallMotion();
+    void fillsActionSequenceAcrossSteadyUpdates();
+    void fillsTwoSequencesForSeparatedPeople();
+    void keepsTwoTracksAliveThroughCrossing();
     void usesLowScoreDetectionsToRecoverLostTrack();
     void removesTrackAfterTimeout();
     void sortsOutputLeftToRight();
@@ -50,6 +53,53 @@ void ByteTrackerTest::keepsStableIdsAcrossSmallMotion() {
     QCOMPARE(second.size(), 2);
     QCOMPARE(second.at(0).trackId, first.at(0).trackId);
     QCOMPARE(second.at(1).trackId, first.at(1).trackId);
+}
+
+void ByteTrackerTest::fillsActionSequenceAcrossSteadyUpdates() {
+    ByteTracker tracker(makeConfig());
+
+    QVector<TrackedPerson> tracks;
+    for (int frame = 0; frame < 45; ++frame) {
+        tracks = tracker.update({makePerson(10, 10, 40, 80)}, 1000 + (frame * 33));
+    }
+
+    QCOMPARE(tracks.size(), 1);
+    QVERIFY(tracks.first().action.sequence.isFull());
+}
+
+void ByteTrackerTest::fillsTwoSequencesForSeparatedPeople() {
+    ByteTracker tracker(makeConfig());
+
+    QVector<TrackedPerson> tracks;
+    for (int frame = 0; frame < 45; ++frame) {
+        tracks = tracker.update(
+            {makePerson(10, 10, 40, 80), makePerson(200, 10, 40, 80)}, 1000 + (frame * 33));
+    }
+
+    QCOMPARE(tracks.size(), 2);
+    QVERIFY(tracks.at(0).action.sequence.isFull());
+    QVERIFY(tracks.at(1).action.sequence.isFull());
+}
+
+void ByteTrackerTest::keepsTwoTracksAliveThroughCrossing() {
+    ByteTracker tracker(makeConfig());
+
+    QVector<TrackedPerson> tracks;
+    for (int frame = 0; frame < 50; ++frame) {
+        const float leftX = 20.0f + (frame * 4.0f);
+        const float rightX = 220.0f - (frame * 4.0f);
+        if (frame % 2 == 0) {
+            tracks = tracker.update(
+                {makePerson(rightX, 10, 40, 80), makePerson(leftX, 10, 40, 80)}, 1000 + (frame * 33));
+        } else {
+            tracks = tracker.update(
+                {makePerson(leftX, 10, 40, 80), makePerson(rightX, 10, 40, 80)}, 1000 + (frame * 33));
+        }
+    }
+
+    QCOMPARE(tracks.size(), 2);
+    QVERIFY(tracks.at(0).action.sequence.isFull());
+    QVERIFY(tracks.at(1).action.sequence.isFull());
 }
 
 void ByteTrackerTest::usesLowScoreDetectionsToRecoverLostTrack() {

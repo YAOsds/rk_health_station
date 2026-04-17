@@ -136,9 +136,11 @@ set_target_properties(byte_tracker_test PROPERTIES
 target_include_directories(byte_tracker_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 
 target_link_libraries(byte_tracker_test PRIVATE
+    rk_shared
     ${RK_QT_CORE_TARGET}
     ${RK_QT_TEST_TARGET}
 )
@@ -890,7 +892,9 @@ add_executable(fall_end_to_end_status_test
     ../health_falld/ingest/analysis_stream_client.cpp
     ../health_falld/ipc/fall_gateway.cpp
     ../health_falld/pose/rknn_pose_estimator.cpp
-    ../health_falld/tracking/track_manager.cpp
+    ../health_falld/tracking/association.cpp
+    ../health_falld/tracking/byte_tracker.cpp
+    ../health_falld/tracking/kalman_filter.cpp
     ../health_falld/runtime/runtime_config.cpp
 )
 

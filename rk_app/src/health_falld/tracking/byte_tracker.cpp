@@ -49,7 +49,7 @@ ByteTracker::ByteTracker(const FallRuntimeConfig &config)
     : config_(config) {
 }
 
-QVector<TrackedPerson> ByteTracker::update(const QVector<PosePerson> &detections, qint64 timestampMs) {
+QVector<TrackedPerson> &ByteTracker::update(const QVector<PosePerson> &detections, qint64 timestampMs) {
     const QVector<ByteTrackDetection> allDetections = buildDetections(detections);
     const QVector<int> highDetectionIndexes =
         collectDetectionIndexesByScore(allDetections, config_.trackHighThresh, 2.0);
@@ -93,6 +93,7 @@ QVector<TrackedPerson> ByteTracker::update(const QVector<PosePerson> &detections
             track.missCount = 0;
             track.motion.update(detection.box);
             track.sequence.push(detection.pose);
+            track.action.onMatched(detection.pose);
             matchedTrackIndexes.insert(trackIndex);
             matchedDetectionIndexes.insert(detectionIndex);
         }
@@ -134,6 +135,7 @@ QVector<TrackedPerson> ByteTracker::update(const QVector<PosePerson> &detections
         track.hitCount = 1;
         track.motion.initiate(track.latestPose.box);
         track.sequence.push(track.latestPose);
+        track.action.onMatched(track.latestPose);
         tracks_.push_back(track);
     }
 
@@ -149,6 +151,7 @@ QVector<TrackedPerson> ByteTracker::update(const QVector<PosePerson> &detections
             if (track.lostSinceTs <= 0) {
                 track.lostSinceTs = timestampMs;
             }
+            track.action.onLost();
         }
 
         if (track.lostSinceTs > 0 && timestampMs - track.lostSinceTs > config_.lostTimeoutMs) {
@@ -165,17 +168,11 @@ QVector<TrackedPerson> ByteTracker::update(const QVector<PosePerson> &detections
             return left.latestPose.box.center().x() < right.latestPose.box.center().x();
         });
 
-    return activeTracks();
+    return tracks_;
 }
 
-QVector<TrackedPerson> ByteTracker::activeTracks() const {
-    QVector<TrackedPerson> active;
-    for (const TrackedPerson &track : tracks_) {
-        if (isTrackActive(track)) {
-            active.push_back(track);
-        }
-    }
-    return active;
+const QVector<TrackedPerson> &ByteTracker::activeTracks() const {
+    return tracks_;
 }
 
 void ByteTracker::clear() {

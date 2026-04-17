@@ -25,6 +25,7 @@
 moc_*.cpp
 ui_*.h
 !rk_app/src/health_ui/app/ui_app.h
+!rk_app/src/health_ui/ipc_client/ui_ipc_client.h
 !rk_app/src/healthd/ipc_server/ui_gateway.h
 qrc_*.cpp
 *.qrc.depends

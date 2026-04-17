@@ -10,6 +10,7 @@ class FallIpcClientTest : public QObject {
 
 private slots:
     void receivesRealtimeClassification();
+    void receivesRealtimeClassificationBatch();
     void usesEnvironmentSocketNameByDefault();
 };
 
@@ -41,6 +42,41 @@ void FallIpcClientTest::receivesRealtimeClassification() {
     QCOMPARE(result.cameraId, QStringLiteral("front_cam"));
     QCOMPARE(result.state, QStringLiteral("fall"));
     QCOMPARE(result.confidence, 0.93);
+}
+
+void FallIpcClientTest::receivesRealtimeClassificationBatch() {
+    const QString socketName = QStringLiteral("/tmp/rk_fall_ui_batch_client_test.sock");
+    QLocalServer::removeServer(socketName);
+
+    QLocalServer server;
+    QVERIFY(server.listen(socketName));
+
+    FallIpcClient client(socketName);
+    QSignalSpy batchSpy(&client, SIGNAL(classificationBatchUpdated(FallClassificationBatch)));
+
+    QVERIFY(client.connectToBackend());
+    QVERIFY(server.waitForNewConnection(2000));
+    QLocalSocket *socket = server.nextPendingConnection();
+    QVERIFY(socket != nullptr);
+
+    QTRY_VERIFY_WITH_TIMEOUT(socket->bytesAvailable() > 0 || socket->waitForReadyRead(50), 2000);
+    QVERIFY(socket->readAll().contains("subscribe_classification"));
+
+    const QByteArray line = QByteArrayLiteral(
+        "{\"type\":\"classification_batch\",\"camera_id\":\"front_cam\",\"ts\":1776359310534,"
+        "\"person_count\":2,\"results\":[{\"state\":\"stand\",\"confidence\":0.91},"
+        "{\"state\":\"fall\",\"confidence\":0.96}]}\n");
+    socket->write(line);
+    socket->flush();
+
+    QTRY_COMPARE_WITH_TIMEOUT(batchSpy.count(), 1, 2000);
+    const FallClassificationBatch batch =
+        batchSpy.takeFirst().at(0).value<FallClassificationBatch>();
+    QCOMPARE(batch.cameraId, QStringLiteral("front_cam"));
+    QCOMPARE(batch.results.size(), 2);
+    QCOMPARE(batch.results.at(0).state, QStringLiteral("stand"));
+    QCOMPARE(batch.results.at(1).state, QStringLiteral("fall"));
+    QCOMPARE(batch.results.at(1).confidence, 0.96);
 }
 
 void FallIpcClientTest::usesEnvironmentSocketNameByDefault() {

@@ -12,7 +12,6 @@ VideoPreviewWidget::VideoPreviewWidget(QWidget *parent)
     : QWidget(parent)
     , frameLabel_(new QLabel(QStringLiteral("Preview unavailable"), this))
     , overlayLabel_(new QLabel(QStringLiteral("Preview unavailable"), this))
-    , classificationLabel_(new QLabel(frameLabel_))
     , consumer_(new VideoPreviewConsumer(this))
 {
     auto *layout = new QVBoxLayout(this);
@@ -21,11 +20,6 @@ VideoPreviewWidget::VideoPreviewWidget(QWidget *parent)
     frameLabel_->setStyleSheet(QStringLiteral("background-color: #000; color: #ddd;"));
     layout->addWidget(frameLabel_, 1);
     layout->addWidget(overlayLabel_);
-
-    classificationLabel_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    classificationLabel_->setMargin(8);
-    classificationLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    classificationLabel_->hide();
 
     connect(consumer_, &VideoPreviewConsumer::frameReady, this, [this](const QImage &frame) {
         currentFrame_ = frame;
@@ -71,17 +65,32 @@ void VideoPreviewWidget::setErrorText(const QString &text) {
 
 void VideoPreviewWidget::setClassificationOverlay(
     const QString &text, OverlaySeverity severity) {
-    classificationLabel_->setText(text);
-    applyClassificationStyle(severity);
-    classificationLabel_->adjustSize();
+    setClassificationRows({ClassificationOverlayRow{text, severity}});
+}
+
+void VideoPreviewWidget::setClassificationRows(const QVector<ClassificationOverlayRow> &rows) {
+    const int visibleRowCount = qMin(rows.size(), 5);
+    ensureClassificationLabels(visibleRowCount);
+
+    for (int index = 0; index < visibleRowCount; ++index) {
+        QLabel *label = classificationLabels_.at(index);
+        label->setText(rows.at(index).text);
+        applyClassificationStyle(label, rows.at(index).severity);
+        label->adjustSize();
+        label->show();
+        label->raise();
+    }
+
+    for (int index = visibleRowCount; index < classificationLabels_.size(); ++index) {
+        classificationLabels_.at(index)->clear();
+        classificationLabels_.at(index)->hide();
+    }
+
     updateClassificationGeometry();
-    classificationLabel_->show();
-    classificationLabel_->raise();
 }
 
 void VideoPreviewWidget::clearClassificationOverlay() {
-    classificationLabel_->clear();
-    classificationLabel_->hide();
+    setClassificationRows({});
 }
 
 bool VideoPreviewWidget::hasRenderedFrame() const {
@@ -97,7 +106,17 @@ QString VideoPreviewWidget::statusText() const {
 }
 
 QString VideoPreviewWidget::classificationText() const {
-    return classificationLabel_->text();
+    return classificationRows().join(QLatin1Char('\n'));
+}
+
+QStringList VideoPreviewWidget::classificationRows() const {
+    QStringList rows;
+    for (QLabel *label : classificationLabels_) {
+        if (label != nullptr && !label->isHidden() && !label->text().isEmpty()) {
+            rows.push_back(label->text());
+        }
+    }
+    return rows;
 }
 
 void VideoPreviewWidget::resizeEvent(QResizeEvent *event) {
@@ -117,16 +136,21 @@ void VideoPreviewWidget::renderFrame() {
 }
 
 void VideoPreviewWidget::updateClassificationGeometry() {
-    if (classificationLabel_->text().isEmpty()) {
-        return;
-    }
-
-    classificationLabel_->adjustSize();
     const int margin = 12;
-    classificationLabel_->move(margin, margin);
+    const int spacing = 8;
+    int y = margin;
+    for (QLabel *label : classificationLabels_) {
+        if (label == nullptr || label->isHidden() || label->text().isEmpty()) {
+            continue;
+        }
+        label->adjustSize();
+        label->move(margin, y);
+        y += label->height() + spacing;
+    }
 }
 
-void VideoPreviewWidget::applyClassificationStyle(OverlaySeverity severity) {
+void VideoPreviewWidget::applyClassificationStyle(
+    QLabel *label, OverlaySeverity severity) {
     QString style =
         QStringLiteral("color: #ffffff; border-radius: 10px; padding: 4px 10px;");
     switch (severity) {
@@ -143,5 +167,16 @@ void VideoPreviewWidget::applyClassificationStyle(OverlaySeverity severity) {
         style += QStringLiteral("background-color: rgba(70, 70, 70, 190); font: 600 18px;");
         break;
     }
-    classificationLabel_->setStyleSheet(style);
+    label->setStyleSheet(style);
+}
+
+void VideoPreviewWidget::ensureClassificationLabels(int count) {
+    while (classificationLabels_.size() < count) {
+        auto *label = new QLabel(frameLabel_);
+        label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        label->setMargin(8);
+        label->setAttribute(Qt::WA_TransparentForMouseEvents);
+        label->hide();
+        classificationLabels_.push_back(label);
+    }
 }

@@ -64,6 +64,8 @@ VideoMonitorPage::VideoMonitorPage(
     if (fallClient_ != nullptr) {
         connect(fallClient_, &AbstractFallClient::classificationUpdated,
             this, &VideoMonitorPage::onClassificationUpdated);
+        connect(fallClient_, &AbstractFallClient::classificationBatchUpdated,
+            this, &VideoMonitorPage::onClassificationBatchUpdated);
         connect(fallClient_, &AbstractFallClient::connectionChanged,
             this, &VideoMonitorPage::onFallConnectionChanged);
     }
@@ -96,6 +98,10 @@ QString VideoMonitorPage::storageDirText() const {
 
 QString VideoMonitorPage::previewOverlayText() const {
     return previewWidget_->classificationText();
+}
+
+QStringList VideoMonitorPage::previewOverlayRows() const {
+    return previewWidget_->classificationRows();
 }
 
 QPushButton *VideoMonitorPage::startRecordingButton() const {
@@ -155,9 +161,25 @@ void VideoMonitorPage::onClassificationUpdated(const FallClassificationResult &r
         return;
     }
 
+    FallClassificationBatch batch;
+    batch.cameraId = result.cameraId;
+    batch.timestampMs = result.timestampMs;
+    batch.results.push_back({result.state, result.confidence});
     hasFreshClassification_ = true;
-    previewWidget_->setClassificationOverlay(
-        overlayTextForResult(result), overlaySeverityForState(result.state));
+    previewWidget_->setClassificationRows(overlayRowsForBatch(batch));
+    refreshNoPersonTimer();
+}
+
+void VideoMonitorPage::onClassificationBatchUpdated(const FallClassificationBatch &batch) {
+    if (!batch.cameraId.isEmpty() && batch.cameraId != currentCameraId_) {
+        return;
+    }
+    if (!previewAvailable_) {
+        return;
+    }
+
+    hasFreshClassification_ = !batch.results.isEmpty();
+    previewWidget_->setClassificationRows(overlayRowsForBatch(batch));
     refreshNoPersonTimer();
 }
 
@@ -201,6 +223,31 @@ QString VideoMonitorPage::overlayTextForResult(const FallClassificationResult &r
     return QStringLiteral("%1 %2")
         .arg(result.state)
         .arg(QString::number(result.confidence, 'f', 2));
+}
+
+QVector<VideoPreviewWidget::ClassificationOverlayRow> VideoMonitorPage::overlayRowsForBatch(
+    const FallClassificationBatch &batch) {
+    QVector<VideoPreviewWidget::ClassificationOverlayRow> rows;
+    if (batch.results.isEmpty()) {
+        rows.push_back({
+            QStringLiteral("no person"),
+            VideoPreviewWidget::OverlaySeverity::Muted,
+        });
+        return rows;
+    }
+
+    const int maxRows = qMin(batch.results.size(), 5);
+    rows.reserve(maxRows);
+    for (int index = 0; index < maxRows; ++index) {
+        const FallClassificationEntry &entry = batch.results.at(index);
+        rows.push_back({
+            QStringLiteral("%1 %2")
+                .arg(entry.state)
+                .arg(QString::number(entry.confidence, 'f', 2)),
+            overlaySeverityForState(entry.state),
+        });
+    }
+    return rows;
 }
 
 VideoPreviewWidget::OverlaySeverity VideoMonitorPage::overlaySeverityForState(

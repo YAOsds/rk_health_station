@@ -20,6 +20,7 @@ public:
 
 signals:
     void classificationUpdated(const FallClassificationResult &result);
+    void classificationBatchUpdated(const FallClassificationBatch &batch);
     void connectionChanged(bool connected);
     void errorOccurred(const QString &errorText);
 };

@@ -60,6 +60,7 @@ venv/
 # IDE settings
 .idea/
 .vscode/
+.worktrees/
 
 # OS files
 .DS_Store

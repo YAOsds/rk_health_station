@@ -644,6 +644,27 @@ target_link_libraries(target_selector_test PRIVATE
 
 add_test(NAME target_selector_test COMMAND target_selector_test)
 
+add_executable(track_manager_test
+    fall_daemon_tests/track_manager_test.cpp
+    ../health_falld/tracking/track_manager.cpp
+)
+
+set_target_properties(track_manager_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(track_manager_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(track_manager_test PRIVATE
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME track_manager_test COMMAND track_manager_test)
+
 add_executable(analysis_stream_client_test
     fall_daemon_tests/analysis_stream_client_test.cpp
     ../health_falld/ingest/analysis_stream_client.cpp

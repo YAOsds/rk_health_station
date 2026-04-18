@@ -12,6 +12,7 @@ class AnalysisStreamClientTest : public QObject {
 private slots:
     void decodesIncomingFramePackets();
     void decodesMultiplePacketsFromSingleRead();
+    void reconnectsAfterServerRestarts();
 };
 
 void AnalysisStreamClientTest::decodesIncomingFramePackets() {
@@ -65,6 +66,53 @@ void AnalysisStreamClientTest::decodesMultiplePacketsFromSingleRead() {
     socket->flush();
 
     QTRY_VERIFY_WITH_TIMEOUT(spy.count() == 2, 2000);
+}
+
+void AnalysisStreamClientTest::reconnectsAfterServerRestarts() {
+    const QString socketName = QStringLiteral("/tmp/rk_video_analysis_reconnect_test.sock");
+    QLocalServer::removeServer(socketName);
+
+    QLocalServer firstServer;
+    QVERIFY(firstServer.listen(socketName));
+
+    AnalysisFramePacket first;
+    first.frameId = 31;
+    first.cameraId = QStringLiteral("front_cam");
+    first.payload = QByteArray("one");
+
+    AnalysisFramePacket second;
+    second.frameId = 32;
+    second.cameraId = QStringLiteral("front_cam");
+    second.payload = QByteArray("two");
+
+    AnalysisStreamClient client(socketName);
+    QSignalSpy frameSpy(&client, SIGNAL(frameReceived(AnalysisFramePacket)));
+    QSignalSpy statusSpy(&client, SIGNAL(statusChanged(bool)));
+    client.start();
+
+    QVERIFY(firstServer.waitForNewConnection(2000));
+    QLocalSocket *firstSocket = firstServer.nextPendingConnection();
+    QVERIFY(firstSocket != nullptr);
+    firstSocket->write(encodeAnalysisFramePacket(first));
+    firstSocket->flush();
+    QTRY_VERIFY_WITH_TIMEOUT(frameSpy.count() == 1, 2000);
+
+    firstSocket->disconnectFromServer();
+    QTRY_VERIFY_WITH_TIMEOUT(statusSpy.count() >= 2, 2000);
+
+    delete firstSocket;
+    firstServer.close();
+    QLocalServer::removeServer(socketName);
+
+    QLocalServer secondServer;
+    QVERIFY(secondServer.listen(socketName));
+    QTRY_VERIFY_WITH_TIMEOUT(secondServer.hasPendingConnections(), 3000);
+    QLocalSocket *secondSocket = secondServer.nextPendingConnection();
+    QVERIFY(secondSocket != nullptr);
+    secondSocket->write(encodeAnalysisFramePacket(second));
+    secondSocket->flush();
+
+    QTRY_VERIFY_WITH_TIMEOUT(frameSpy.count() == 2, 3000);
 }
 
 QTEST_MAIN(AnalysisStreamClientTest)

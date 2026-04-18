@@ -40,7 +40,7 @@ class VideoMonitorPageTest : public QObject {
 private slots:
     void showsStatusFieldsAndButtonTransitions();
     void showsMultiPersonClassificationOverlay();
-    void showsNoPersonOverlayWhenClassificationGoesStale();
+    void doesNotShowNoPersonWhileClassificationIsStillWarmingUp();
     void showsNoPersonOverlayForEmptyBatch();
 };
 
@@ -90,7 +90,7 @@ void VideoMonitorPageTest::showsMultiPersonClassificationOverlay() {
         QStringList({QStringLiteral("stand 0.91"), QStringLiteral("fall 0.96")}));
 }
 
-void VideoMonitorPageTest::showsNoPersonOverlayWhenClassificationGoesStale() {
+void VideoMonitorPageTest::doesNotShowNoPersonWhileClassificationIsStillWarmingUp() {
     FakeVideoIpcClient client;
     FakeFallIpcClient fallClient;
     VideoMonitorPage page(&client, &fallClient);
@@ -104,7 +104,8 @@ void VideoMonitorPageTest::showsNoPersonOverlayWhenClassificationGoesStale() {
     emit client.statusReceived(status);
     emit fallClient.connectionChanged(true);
 
-    QTRY_COMPARE_WITH_TIMEOUT(page.previewOverlayRows(), QStringList({QStringLiteral("no person")}), 2500);
+    QTest::qWait(1700);
+    QCOMPARE(page.previewOverlayRows(), QStringList());
 }
 
 void VideoMonitorPageTest::showsNoPersonOverlayForEmptyBatch() {

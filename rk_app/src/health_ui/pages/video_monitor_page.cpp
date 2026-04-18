@@ -198,9 +198,7 @@ void VideoMonitorPage::onNoPersonTimeout() {
         return;
     }
 
-    previewWidget_->setClassificationOverlay(
-        QStringLiteral("no person"),
-        VideoPreviewWidget::OverlaySeverity::Muted);
+    previewWidget_->clearClassificationOverlay();
 }
 
 QString VideoMonitorPage::cameraStateLabel(VideoCameraState state) {

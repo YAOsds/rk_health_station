@@ -22,6 +22,8 @@ AnalysisStreamClient::AnalysisStreamClient(const QString &socketName, QObject *p
         emit statusChanged(true);
     });
     connect(socket_, &QLocalSocket::disconnected, this, [this]() {
+        // Each socket session must start with a clean packet buffer.
+        readBuffer_.clear();
         emit statusChanged(false);
     });
     connect(socket_, &QLocalSocket::stateChanged, this, [this](QLocalSocket::LocalSocketState state) {

@@ -13,6 +13,7 @@ private slots:
     void decodesIncomingFramePackets();
     void decodesMultiplePacketsFromSingleRead();
     void reconnectsAfterServerRestarts();
+    void clearsPartialPacketBufferBeforeReconnect();
 };
 
 void AnalysisStreamClientTest::decodesIncomingFramePackets() {
@@ -113,6 +114,53 @@ void AnalysisStreamClientTest::reconnectsAfterServerRestarts() {
     secondSocket->flush();
 
     QTRY_VERIFY_WITH_TIMEOUT(frameSpy.count() == 2, 3000);
+}
+
+void AnalysisStreamClientTest::clearsPartialPacketBufferBeforeReconnect() {
+    const QString socketName = QStringLiteral("/tmp/rk_video_analysis_partial_reconnect_test.sock");
+    QLocalServer::removeServer(socketName);
+
+    QLocalServer firstServer;
+    QVERIFY(firstServer.listen(socketName));
+
+    AnalysisFramePacket first;
+    first.frameId = 41;
+    first.cameraId = QStringLiteral("front_cam");
+    first.payload = QByteArray("one");
+
+    AnalysisFramePacket second;
+    second.frameId = 42;
+    second.cameraId = QStringLiteral("front_cam");
+    second.payload = QByteArray("two");
+
+    const QByteArray firstEncoded = encodeAnalysisFramePacket(first);
+    const int splitIndex = firstEncoded.size() / 2;
+
+    AnalysisStreamClient client(socketName);
+    QSignalSpy frameSpy(&client, SIGNAL(frameReceived(AnalysisFramePacket)));
+    client.start();
+
+    QVERIFY(firstServer.waitForNewConnection(2000));
+    QLocalSocket *firstSocket = firstServer.nextPendingConnection();
+    QVERIFY(firstSocket != nullptr);
+    firstSocket->write(firstEncoded.left(splitIndex));
+    firstSocket->flush();
+    firstSocket->disconnectFromServer();
+    QTRY_VERIFY_WITH_TIMEOUT(firstSocket->state() == QLocalSocket::UnconnectedState, 2000);
+
+    delete firstSocket;
+    firstServer.close();
+    QLocalServer::removeServer(socketName);
+
+    QLocalServer secondServer;
+    QVERIFY(secondServer.listen(socketName));
+    QTRY_VERIFY_WITH_TIMEOUT(secondServer.hasPendingConnections(), 3000);
+    QLocalSocket *secondSocket = secondServer.nextPendingConnection();
+    QVERIFY(secondSocket != nullptr);
+    secondSocket->write(encodeAnalysisFramePacket(second));
+    secondSocket->flush();
+
+    QTRY_VERIFY_WITH_TIMEOUT(frameSpy.count() == 1, 3000);
 }
 
 QTEST_MAIN(AnalysisStreamClientTest)

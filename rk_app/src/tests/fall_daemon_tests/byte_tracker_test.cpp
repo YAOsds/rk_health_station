@@ -33,6 +33,7 @@ class ByteTrackerTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void keepsNewTrackTrackedOnCreationFrame();
     void keepsStableIdsAcrossSmallMotion();
     void fillsActionSequenceAcrossSteadyUpdates();
     void fillsTwoSequencesForSeparatedPeople();
@@ -42,6 +43,16 @@ private slots:
     void sortsOutputLeftToRight();
     void limitsTracksToFive();
 };
+
+void ByteTrackerTest::keepsNewTrackTrackedOnCreationFrame() {
+    ByteTracker tracker(makeConfig());
+
+    const auto tracks = tracker.update({makePerson(10, 10, 40, 80, 0.95f)}, 1000);
+    QCOMPARE(tracks.size(), 1);
+    QCOMPARE(tracks.first().state, ByteTrackState::Tracked);
+    QCOMPARE(tracks.first().missCount, 0);
+    QCOMPARE(tracks.first().lostSinceTs, 0);
+}
 
 void ByteTrackerTest::keepsStableIdsAcrossSmallMotion() {
     ByteTracker tracker(makeConfig());
@@ -124,7 +135,7 @@ void ByteTrackerTest::removesTrackAfterTimeout() {
 
     QCOMPARE(tracker.update({makePerson(10, 10, 40, 80)}, 1000).size(), 1);
     QCOMPARE(tracker.update({}, 1500).size(), 1);
-    QCOMPARE(tracker.update({}, 1901).size(), 0);
+    QCOMPARE(tracker.update({}, 2301).size(), 0);
 }
 
 void ByteTrackerTest::sortsOutputLeftToRight() {

@@ -137,6 +137,9 @@ QVector<TrackedPerson> &ByteTracker::update(const QVector<PosePerson> &detection
         track.sequence.push(track.latestPose);
         track.action.onMatched(track.latestPose);
         tracks_.push_back(track);
+        const int newTrackIndex = tracks_.size() - 1;
+        matchedTrackIndexes.insert(newTrackIndex);
+        matchedDetectionIndexes.insert(detectionIndex);
     }
 
     for (int trackIndex = 0; trackIndex < tracks_.size(); ++trackIndex) {

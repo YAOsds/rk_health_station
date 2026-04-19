@@ -13,6 +13,7 @@
 #include "pages/settings_page.h"
 
 #include <QHBoxLayout>
+#include <QFileDialog>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QDebug>
@@ -36,7 +37,17 @@ UiApp::UiApp(QObject *parent)
     , historyPage_(new HistoryPage(stack_))
     , videoClient_(new VideoIpcClient(this))
     , fallClient_(new FallIpcClient(QString(), this))
-    , videoMonitorPage_(new VideoMonitorPage(videoClient_, fallClient_, stack_)) {
+    , videoMonitorPage_(new VideoMonitorPage(
+          videoClient_,
+          fallClient_,
+          stack_,
+          [this]() {
+              return QFileDialog::getOpenFileName(
+                  window_,
+                  QStringLiteral("Select Test Video"),
+                  QString(),
+                  QStringLiteral("Video Files (*.mp4 *.MP4);;All Files (*)"));
+          })) {
     auto *central = new QWidget(window_);
     auto *rootLayout = new QVBoxLayout(central);
     auto *navLayout = new QHBoxLayout();

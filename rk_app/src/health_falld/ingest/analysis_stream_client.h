@@ -5,6 +5,7 @@
 #include <QObject>
 
 class QLocalSocket;
+class QTimer;
 
 class AnalysisStreamClient : public QObject {
     Q_OBJECT
@@ -20,9 +21,13 @@ signals:
     void statusChanged(bool connected);
 
 private:
+    void attemptConnect();
+    void scheduleReconnect();
     void onReadyRead();
 
     QString socketName_;
     QLocalSocket *socket_ = nullptr;
+    QTimer *reconnectTimer_ = nullptr;
     QByteArray readBuffer_;
+    bool running_ = false;
 };

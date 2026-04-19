@@ -100,6 +100,76 @@ target_link_libraries(action_classifier_factory_test PRIVATE
 
 add_test(NAME action_classifier_factory_test COMMAND action_classifier_factory_test)
 
+add_executable(association_test
+    fall_daemon_tests/association_test.cpp
+    ../health_falld/tracking/association.cpp
+)
+
+set_target_properties(association_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(association_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+)
+
+target_link_libraries(association_test PRIVATE
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME association_test COMMAND association_test)
+
+add_executable(byte_tracker_test
+    fall_daemon_tests/byte_tracker_test.cpp
+    ../health_falld/tracking/association.cpp
+    ../health_falld/tracking/byte_tracker.cpp
+    ../health_falld/tracking/kalman_filter.cpp
+    ../health_falld/runtime/runtime_config.cpp
+)
+
+set_target_properties(byte_tracker_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(byte_tracker_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(byte_tracker_test PRIVATE
+    rk_shared
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME byte_tracker_test COMMAND byte_tracker_test)
+
+add_executable(track_action_context_test
+    fall_daemon_tests/track_action_context_test.cpp
+    ../health_falld/domain/fall_event_policy.cpp
+)
+
+set_target_properties(track_action_context_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(track_action_context_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(track_action_context_test PRIVATE
+    rk_shared
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME track_action_context_test COMMAND track_action_context_test)
+
 add_executable(protocol_codec_test
     protocol_tests/protocol_codec_test.cpp
 )
@@ -822,7 +892,9 @@ add_executable(fall_end_to_end_status_test
     ../health_falld/ingest/analysis_stream_client.cpp
     ../health_falld/ipc/fall_gateway.cpp
     ../health_falld/pose/rknn_pose_estimator.cpp
-    ../health_falld/tracking/track_manager.cpp
+    ../health_falld/tracking/association.cpp
+    ../health_falld/tracking/byte_tracker.cpp
+    ../health_falld/tracking/kalman_filter.cpp
     ../health_falld/runtime/runtime_config.cpp
 )
 

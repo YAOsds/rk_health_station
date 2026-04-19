@@ -7,7 +7,9 @@ class VideoProtocolTest : public QObject {
 
 private slots:
     void roundTripsStatusPayload();
+    void roundTripsTestInputStatusPayload();
     void roundTripsCommandPayload();
+    void roundTripsStartTestInputCommandPayload();
     void rejectsInvalidCameraState();
 };
 
@@ -34,6 +36,23 @@ void VideoProtocolTest::roundTripsStatusPayload() {
     QCOMPARE(decoded.recording, status.recording);
 }
 
+void VideoProtocolTest::roundTripsTestInputStatusPayload() {
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.cameraState = VideoCameraState::Previewing;
+    status.previewUrl = QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview");
+    status.inputMode = QStringLiteral("test_file");
+    status.testFilePath = QStringLiteral("/tmp/fall-demo.mp4");
+    status.testPlaybackState = QStringLiteral("finished");
+
+    const QJsonObject json = videoChannelStatusToJson(status);
+    VideoChannelStatus decoded;
+    QVERIFY(videoChannelStatusFromJson(json, &decoded));
+    QCOMPARE(decoded.inputMode, QStringLiteral("test_file"));
+    QCOMPARE(decoded.testFilePath, QStringLiteral("/tmp/fall-demo.mp4"));
+    QCOMPARE(decoded.testPlaybackState, QStringLiteral("finished"));
+}
+
 void VideoProtocolTest::roundTripsCommandPayload() {
     VideoCommand command;
     command.action = QStringLiteral("set_storage_dir");
@@ -47,6 +66,21 @@ void VideoProtocolTest::roundTripsCommandPayload() {
     QCOMPARE(decoded.action, command.action);
     QCOMPARE(decoded.cameraId, command.cameraId);
     QCOMPARE(decoded.payload.value(QStringLiteral("storage_dir")).toString(), QStringLiteral("/home/elf/videosurv/"));
+}
+
+void VideoProtocolTest::roundTripsStartTestInputCommandPayload() {
+    VideoCommand command;
+    command.action = QStringLiteral("start_test_input");
+    command.requestId = QStringLiteral("video-2");
+    command.cameraId = QStringLiteral("front_cam");
+    command.payload.insert(QStringLiteral("file_path"), QStringLiteral("/tmp/fall-demo.mp4"));
+
+    const QJsonObject json = videoCommandToJson(command);
+    VideoCommand decoded;
+    QVERIFY(videoCommandFromJson(json, &decoded));
+    QCOMPARE(decoded.action, QStringLiteral("start_test_input"));
+    QCOMPARE(decoded.payload.value(QStringLiteral("file_path")).toString(),
+        QStringLiteral("/tmp/fall-demo.mp4"));
 }
 
 void VideoProtocolTest::rejectsInvalidCameraState() {

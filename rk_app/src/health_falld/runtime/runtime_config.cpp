@@ -10,6 +10,22 @@ ActionBackendKind parseActionBackend(const QString &value) {
     }
     return ActionBackendKind::StgcnRknn;
 }
+
+void applyPositiveIntEnv(const char *name, int *target) {
+    bool ok = false;
+    const int value = qEnvironmentVariableIntValue(name, &ok);
+    if (ok && value > 0) {
+        *target = value;
+    }
+}
+
+void applyPositiveDoubleEnv(const char *name, double *target) {
+    bool ok = false;
+    const double value = qEnvironmentVariable(name).toDouble(&ok);
+    if (ok && value > 0.0) {
+        *target = value;
+    }
+}
 }
 
 FallRuntimeConfig loadFallRuntimeConfig() {
@@ -44,11 +60,15 @@ FallRuntimeConfig loadFallRuntimeConfig() {
         config.actionBackend = parseActionBackend(actionBackend);
     }
 
-    bool ok = false;
-    const int sequenceLength = qEnvironmentVariableIntValue("RK_FALL_SEQUENCE_LENGTH", &ok);
-    if (ok && sequenceLength > 0) {
-        config.sequenceLength = sequenceLength;
-    }
+    applyPositiveIntEnv("RK_FALL_MAX_TRACKS", &config.maxTracks);
+    applyPositiveIntEnv("RK_FALL_LOST_TIMEOUT_MS", &config.lostTimeoutMs);
+    applyPositiveIntEnv("RK_FALL_MIN_VALID_KEYPOINTS", &config.minValidKeypoints);
+    applyPositiveIntEnv("RK_FALL_SEQUENCE_LENGTH", &config.sequenceLength);
+    applyPositiveDoubleEnv("RK_FALL_TRACK_HIGH_THRESH", &config.trackHighThresh);
+    applyPositiveDoubleEnv("RK_FALL_TRACK_LOW_THRESH", &config.trackLowThresh);
+    applyPositiveDoubleEnv("RK_FALL_NEW_TRACK_THRESH", &config.newTrackThresh);
+    applyPositiveDoubleEnv("RK_FALL_MATCH_THRESH", &config.matchThresh);
+    applyPositiveDoubleEnv("RK_FALL_MIN_BOX_AREA", &config.minBoxArea);
 
     const QString cameraId = qEnvironmentVariable("RK_FALL_CAMERA_ID");
     if (!cameraId.isEmpty()) {

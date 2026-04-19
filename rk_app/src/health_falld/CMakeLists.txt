@@ -48,6 +48,14 @@ add_executable(health-falld
     pose/rknn_pose_estimator.h
     pose/pose_estimator.h
     pose/pose_types.h
+    tracking/association.cpp
+    tracking/association.h
+    tracking/byte_track_detection.h
+    tracking/byte_track_state.h
+    tracking/byte_tracker.cpp
+    tracking/byte_tracker.h
+    tracking/kalman_filter.cpp
+    tracking/kalman_filter.h
     tracking/track_manager.cpp
     tracking/track_manager.h
     tracking/tracked_person.h

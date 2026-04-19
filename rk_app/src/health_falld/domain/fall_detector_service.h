@@ -17,8 +17,9 @@ public:
     explicit FallDetectorService(ActionClassifier *classifier = nullptr);
 
     FallDetectorResult update(const QVector<PosePerson> &sequence, QString *error);
+    FallDetectorResult update(
+        const QVector<PosePerson> &sequence, FallEventPolicy *policy, QString *error);
 
 private:
     ActionClassifier *classifier_ = nullptr;
-    FallEventPolicy policy_;
 };

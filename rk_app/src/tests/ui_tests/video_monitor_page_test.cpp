@@ -20,6 +20,8 @@ public:
     void startRecording(const QString &) override {}
     void stopRecording(const QString &) override {}
     void setStorageDir(const QString &, const QString &) override {}
+    void startTestInput(const QString &, const QString &) override {}
+    void stopTestInput(const QString &) override {}
 };
 
 class FakeFallIpcClient : public AbstractFallClient {
@@ -39,8 +41,9 @@ class VideoMonitorPageTest : public QObject {
 
 private slots:
     void showsStatusFieldsAndButtonTransitions();
+    void showsTestModeStatusAndDisablesCameraControls();
     void showsMultiPersonClassificationOverlay();
-    void showsNoPersonOverlayWhenClassificationGoesStale();
+    void doesNotShowNoPersonWhileClassificationIsStillWarmingUp();
     void showsNoPersonOverlayForEmptyBatch();
 };
 
@@ -63,6 +66,31 @@ void VideoMonitorPageTest::showsStatusFieldsAndButtonTransitions() {
     QCOMPARE(page.storageDirText(), QStringLiteral("/home/elf/videosurv/"));
     QVERIFY(page.startRecordingButton()->isEnabled());
     QVERIFY(!page.stopRecordingButton()->isEnabled());
+}
+
+void VideoMonitorPageTest::showsTestModeStatusAndDisablesCameraControls() {
+    FakeVideoIpcClient client;
+    FakeFallIpcClient fallClient;
+    VideoMonitorPage page(&client, &fallClient, nullptr,
+        []() { return QStringLiteral("/tmp/fall-demo.mp4"); });
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.cameraState = VideoCameraState::Previewing;
+    status.previewUrl = QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    status.inputMode = QStringLiteral("test_file");
+    status.testFilePath = QStringLiteral("/tmp/fall-demo.mp4");
+    status.testPlaybackState = QStringLiteral("finished");
+
+    emit client.statusReceived(status);
+
+    QCOMPARE(page.inputModeText(), QStringLiteral("Test Video (Finished)"));
+    QCOMPARE(page.testFileText(), QStringLiteral("fall-demo.mp4"));
+    QVERIFY(!page.takeSnapshotButton()->isEnabled());
+    QVERIFY(!page.startRecordingButton()->isEnabled());
+    QVERIFY(page.exitTestModeButton()->isEnabled());
 }
 
 void VideoMonitorPageTest::showsMultiPersonClassificationOverlay() {
@@ -90,7 +118,7 @@ void VideoMonitorPageTest::showsMultiPersonClassificationOverlay() {
         QStringList({QStringLiteral("stand 0.91"), QStringLiteral("fall 0.96")}));
 }
 
-void VideoMonitorPageTest::showsNoPersonOverlayWhenClassificationGoesStale() {
+void VideoMonitorPageTest::doesNotShowNoPersonWhileClassificationIsStillWarmingUp() {
     FakeVideoIpcClient client;
     FakeFallIpcClient fallClient;
     VideoMonitorPage page(&client, &fallClient);
@@ -104,7 +132,8 @@ void VideoMonitorPageTest::showsNoPersonOverlayWhenClassificationGoesStale() {
     emit client.statusReceived(status);
     emit fallClient.connectionChanged(true);
 
-    QTRY_COMPARE_WITH_TIMEOUT(page.previewOverlayRows(), QStringList({QStringLiteral("no person")}), 2500);
+    QTest::qWait(1700);
+    QCOMPARE(page.previewOverlayRows(), QStringList());
 }
 
 void VideoMonitorPageTest::showsNoPersonOverlayForEmptyBatch() {

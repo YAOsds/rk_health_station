@@ -6,6 +6,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
 
 namespace {
 const char kDefaultCameraId[] = "front_cam";
@@ -21,6 +22,7 @@ VideoService::VideoService(
     , analysisBackend_(analysisBackend ? analysisBackend : new GstreamerAnalysisOutputBackend())
     , ownsPipelineBackend_(!pipelineBackend)
     , ownsAnalysisBackend_(!analysisBackend) {
+    pipelineBackend_->setObserver(this);
     initializeDefaultChannels();
 }
 
@@ -86,6 +88,10 @@ VideoCommandResult VideoService::takeSnapshot(const QString &cameraId) {
     }
 
     VideoChannelStatus &channel = channels_[cameraId];
+    if (channel.inputMode == QStringLiteral("test_file")) {
+        return buildErrorResult(cameraId, QStringLiteral("take_snapshot"),
+            QStringLiteral("unsupported_in_test_mode"));
+    }
     if (channel.recording) {
         return buildErrorResult(cameraId, QStringLiteral("take_snapshot"),
             QStringLiteral("busy_recording"));
@@ -140,6 +146,10 @@ VideoCommandResult VideoService::startRecording(const QString &cameraId) {
     }
 
     VideoChannelStatus &channel = channels_[cameraId];
+    if (channel.inputMode == QStringLiteral("test_file")) {
+        return buildErrorResult(cameraId, QStringLiteral("start_recording"),
+            QStringLiteral("unsupported_in_test_mode"));
+    }
     if (channel.recording) {
         return buildErrorResult(cameraId, QStringLiteral("start_recording"),
             QStringLiteral("already_recording"));
@@ -219,6 +229,61 @@ VideoCommandResult VideoService::stopRecording(const QString &cameraId) {
     return buildOkResult(cameraId, QStringLiteral("stop_recording"), payload);
 }
 
+VideoCommandResult VideoService::startTestInput(const QString &cameraId, const QString &filePath) {
+    if (!channels_.contains(cameraId)) {
+        return buildErrorResult(cameraId, QStringLiteral("start_test_input"),
+            QStringLiteral("camera_not_found"));
+    }
+
+    QString validationError;
+    if (!validateTestFilePath(filePath, &validationError)) {
+        return buildErrorResult(cameraId, QStringLiteral("start_test_input"), validationError);
+    }
+
+    VideoChannelStatus previous = channels_.value(cameraId);
+    VideoChannelStatus &channel = channels_[cameraId];
+    channel.recording = false;
+    channel.currentRecordPath.clear();
+    channel.inputMode = QStringLiteral("test_file");
+    channel.testFilePath = QFileInfo(filePath).absoluteFilePath();
+    channel.testPlaybackState = QStringLiteral("playing");
+    channel.lastError.clear();
+
+    QString errorCode;
+    if (!restartPreviewForChannel(cameraId, &errorCode)) {
+        channels_[cameraId] = previous;
+        Q_UNUSED(errorCode);
+        return buildErrorResult(cameraId, QStringLiteral("start_test_input"),
+            QStringLiteral("test_input_start_failed"));
+    }
+
+    return buildOkResult(cameraId, QStringLiteral("start_test_input"),
+        videoChannelStatusToJson(channels_.value(cameraId)));
+}
+
+VideoCommandResult VideoService::stopTestInput(const QString &cameraId) {
+    if (!channels_.contains(cameraId)) {
+        return buildErrorResult(cameraId, QStringLiteral("stop_test_input"),
+            QStringLiteral("camera_not_found"));
+    }
+
+    VideoChannelStatus previous = channels_.value(cameraId);
+    VideoChannelStatus &channel = channels_[cameraId];
+    resetTestModeState(&channel);
+    channel.lastError.clear();
+
+    QString errorCode;
+    if (!restartPreviewForChannel(cameraId, &errorCode)) {
+        channels_[cameraId] = previous;
+        Q_UNUSED(errorCode);
+        return buildErrorResult(cameraId, QStringLiteral("stop_test_input"),
+            QStringLiteral("test_input_stop_failed"));
+    }
+
+    return buildOkResult(cameraId, QStringLiteral("stop_test_input"),
+        videoChannelStatusToJson(channels_.value(cameraId)));
+}
+
 void VideoService::initializeDefaultChannels() {
     VideoChannelStatus channel;
     channel.cameraId = QString::fromUtf8(kDefaultCameraId);
@@ -279,6 +344,62 @@ bool VideoService::ensurePreview(const QString &cameraId, QString *errorCode) {
     return true;
 }
 
+bool VideoService::restartPreviewForChannel(const QString &cameraId, QString *errorCode) {
+    if (errorCode) {
+        errorCode->clear();
+    }
+    if (!channels_.contains(cameraId)) {
+        if (errorCode) {
+            *errorCode = QStringLiteral("camera_not_found");
+        }
+        return false;
+    }
+
+    VideoChannelStatus &channel = channels_[cameraId];
+    QString stopError;
+    if (!pipelineBackend_->stopPreview(cameraId, &stopError)) {
+        channel.lastError = stopError;
+        channel.cameraState = VideoCameraState::Error;
+        if (errorCode) {
+            *errorCode = QStringLiteral("preview_stop_failed");
+        }
+        return false;
+    }
+
+    channel.previewUrl.clear();
+    channel.cameraState = VideoCameraState::Idle;
+    return ensurePreview(cameraId, errorCode);
+}
+
+bool VideoService::validateTestFilePath(const QString &filePath, QString *errorCode) const {
+    if (errorCode) {
+        errorCode->clear();
+    }
+    const QFileInfo info(filePath);
+    if (!info.exists() || !info.isFile()) {
+        if (errorCode) {
+            *errorCode = QStringLiteral("test_file_not_found");
+        }
+        return false;
+    }
+    if (!info.isReadable()) {
+        if (errorCode) {
+            *errorCode = QStringLiteral("test_file_invalid");
+        }
+        return false;
+    }
+    return true;
+}
+
+void VideoService::resetTestModeState(VideoChannelStatus *channel) const {
+    if (!channel) {
+        return;
+    }
+    channel->inputMode = QStringLiteral("camera");
+    channel->testFilePath.clear();
+    channel->testPlaybackState = QStringLiteral("idle");
+}
+
 bool VideoService::analysisEnabledForCamera(const QString &cameraId) const {
     Q_UNUSED(cameraId);
     return qEnvironmentVariableIntValue(kAnalysisEnabledEnvVar) == 1;
@@ -294,6 +415,29 @@ void VideoService::syncAnalysisOutput(const QString &cameraId) {
         analysisBackend_->start(channels_.value(cameraId), &error);
     } else {
         analysisBackend_->stop(cameraId, &error);
+    }
+}
+
+void VideoService::onPipelinePlaybackFinished(const QString &cameraId) {
+    if (!channels_.contains(cameraId)) {
+        return;
+    }
+    VideoChannelStatus &channel = channels_[cameraId];
+    if (channel.inputMode != QStringLiteral("test_file")) {
+        return;
+    }
+    channel.testPlaybackState = QStringLiteral("finished");
+    channel.lastError.clear();
+}
+
+void VideoService::onPipelineRuntimeError(const QString &cameraId, const QString &error) {
+    if (!channels_.contains(cameraId)) {
+        return;
+    }
+    VideoChannelStatus &channel = channels_[cameraId];
+    channel.lastError = error;
+    if (channel.inputMode == QStringLiteral("test_file")) {
+        channel.testPlaybackState = QStringLiteral("error");
     }
 }
 

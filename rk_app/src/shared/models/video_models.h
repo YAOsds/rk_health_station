@@ -30,6 +30,9 @@ struct VideoChannelStatus {
     QString currentRecordPath;
     QString lastError;
     bool recording = false;
+    QString inputMode = QStringLiteral("camera");
+    QString testFilePath;
+    QString testPlaybackState = QStringLiteral("idle");
     VideoProfile previewProfile;
     VideoProfile snapshotProfile;
     VideoProfile recordProfile;

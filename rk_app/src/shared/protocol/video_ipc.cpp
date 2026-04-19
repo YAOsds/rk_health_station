@@ -94,6 +94,9 @@ QJsonObject videoChannelStatusToJson(const VideoChannelStatus &status) {
     json.insert(QStringLiteral("current_record_path"), status.currentRecordPath);
     json.insert(QStringLiteral("last_error"), status.lastError);
     json.insert(QStringLiteral("recording"), status.recording);
+    json.insert(QStringLiteral("input_mode"), status.inputMode);
+    json.insert(QStringLiteral("test_file_path"), status.testFilePath);
+    json.insert(QStringLiteral("test_playback_state"), status.testPlaybackState);
     json.insert(QStringLiteral("preview_profile"), buildProfileJson(status.previewProfile));
     json.insert(QStringLiteral("snapshot_profile"), buildProfileJson(status.snapshotProfile));
     json.insert(QStringLiteral("record_profile"), buildProfileJson(status.recordProfile));
@@ -122,6 +125,10 @@ bool videoChannelStatusFromJson(const QJsonObject &json, VideoChannelStatus *sta
     parsed.currentRecordPath = json.value(QStringLiteral("current_record_path")).toString();
     parsed.lastError = json.value(QStringLiteral("last_error")).toString();
     parsed.recording = json.value(QStringLiteral("recording")).toBool();
+    parsed.inputMode = json.value(QStringLiteral("input_mode")).toString(QStringLiteral("camera"));
+    parsed.testFilePath = json.value(QStringLiteral("test_file_path")).toString();
+    parsed.testPlaybackState = json.value(QStringLiteral("test_playback_state"))
+                                   .toString(QStringLiteral("idle"));
     parseProfileJson(json.value(QStringLiteral("preview_profile")).toObject(), &parsed.previewProfile);
     parseProfileJson(json.value(QStringLiteral("snapshot_profile")).toObject(), &parsed.snapshotProfile);
     parseProfileJson(json.value(QStringLiteral("record_profile")).toObject(), &parsed.recordProfile);

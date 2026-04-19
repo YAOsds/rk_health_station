@@ -32,11 +32,13 @@ public:
     void setClassificationOverlay(const QString &text, OverlaySeverity severity);
     void setClassificationRows(const QVector<ClassificationOverlayRow> &rows);
     void clearClassificationOverlay();
+    void setSourceBadge(const QString &title, const QString &subtitle = QString());
     bool hasRenderedFrame() const;
     QSize renderedFrameSize() const;
     QString statusText() const;
     QString classificationText() const;
     QStringList classificationRows() const;
+    QString sourceBadgeText() const;
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -44,11 +46,13 @@ protected:
 private:
     void renderFrame();
     void updateClassificationGeometry();
+    void updateSourceBadgeGeometry();
     void applyClassificationStyle(QLabel *label, OverlaySeverity severity);
     void ensureClassificationLabels(int count);
 
     QLabel *frameLabel_ = nullptr;
     QLabel *overlayLabel_ = nullptr;
+    QLabel *sourceBadgeLabel_ = nullptr;
     QVector<QLabel *> classificationLabels_;
     VideoPreviewConsumer *consumer_ = nullptr;
     QImage currentFrame_;

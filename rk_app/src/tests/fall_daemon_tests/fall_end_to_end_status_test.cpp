@@ -3,6 +3,7 @@
 
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QtTest/QTest>
@@ -18,7 +19,56 @@ private slots:
     void startsWithRuleBackendWhenConfiguredExplicitly();
     void streamsClassificationAfterWindowFills();
     void streamsClassificationBatchForMultiplePeople();
+    void keepsBatchOrderLeftToRightAfterCrossing();
+    void isolatesFallConfirmationPerTrackedPerson();
 };
+
+namespace {
+PosePerson makeRulePose(float centerX, float shoulderY, float hipY, float score = 0.95f) {
+    PosePerson person;
+    person.score = score;
+    person.box = QRectF(centerX - 60.0f, qMin(shoulderY, hipY) - 40.0f, 120.0f, 240.0f);
+    person.keypoints.resize(17);
+    for (int index = 0; index < person.keypoints.size(); ++index) {
+        person.keypoints[index].x = centerX;
+        person.keypoints[index].y = hipY;
+        person.keypoints[index].score = 0.9f;
+    }
+
+    person.keypoints[5].x = centerX - 15.0f;
+    person.keypoints[5].y = shoulderY;
+    person.keypoints[6].x = centerX + 15.0f;
+    person.keypoints[6].y = shoulderY;
+    person.keypoints[11].x = centerX - 12.0f;
+    person.keypoints[11].y = hipY;
+    person.keypoints[12].x = centerX + 12.0f;
+    person.keypoints[12].y = hipY;
+    return person;
+}
+
+QJsonObject readJsonMessage(QLocalSocket *socket, QByteArray *buffer, int timeoutMs = 250) {
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMs) {
+        const int bufferedNewlineIndex = buffer->indexOf('\n');
+        if (bufferedNewlineIndex >= 0) {
+            const QByteArray line = buffer->left(bufferedNewlineIndex).trimmed();
+            buffer->remove(0, bufferedNewlineIndex + 1);
+            return QJsonDocument::fromJson(line).object();
+        }
+        if (socket->bytesAvailable() > 0 || socket->waitForReadyRead(50)) {
+            buffer->append(socket->readAll());
+            const int newlineIndex = buffer->indexOf('\n');
+            if (newlineIndex >= 0) {
+                const QByteArray line = buffer->left(newlineIndex).trimmed();
+                buffer->remove(0, newlineIndex + 1);
+                return QJsonDocument::fromJson(line).object();
+            }
+        }
+    }
+    return {};
+}
+}
 
 class SinglePoseEstimator : public PoseEstimator {
 public:
@@ -87,6 +137,70 @@ public:
 
         return {left, right};
     }
+};
+
+class CrossingPoseEstimatorStub : public PoseEstimator {
+public:
+    bool loadModel(const QString &path, QString *error) override {
+        Q_UNUSED(path);
+        if (error) {
+            error->clear();
+        }
+        return true;
+    }
+
+    QVector<PosePerson> infer(const AnalysisFramePacket &frame, QString *error) override {
+        Q_UNUSED(frame);
+        if (error) {
+            error->clear();
+        }
+
+        const float leftX = 80.0f + (frameIndex_ * 4.0f);
+        const float rightX = 280.0f - (frameIndex_ * 4.0f);
+        const float lieHipY = frameIndex_ < 44 ? (120.0f + frameIndex_) : 190.0f;
+        const float lieShoulderY = frameIndex_ < 44 ? 60.0f : 195.0f;
+
+        PosePerson left = makeRulePose(leftX, lieShoulderY, lieHipY, 0.95f);
+        PosePerson right = makeRulePose(rightX, 60.0f, 120.0f, 0.93f);
+
+        ++frameIndex_;
+        if (frameIndex_ % 2 == 0) {
+            return {right, left};
+        }
+        return {left, right};
+    }
+
+private:
+    int frameIndex_ = 0;
+};
+
+class MixedStatePoseEstimatorStub : public PoseEstimator {
+public:
+    bool loadModel(const QString &path, QString *error) override {
+        Q_UNUSED(path);
+        if (error) {
+            error->clear();
+        }
+        return true;
+    }
+
+    QVector<PosePerson> infer(const AnalysisFramePacket &frame, QString *error) override {
+        Q_UNUSED(frame);
+        if (error) {
+            error->clear();
+        }
+
+        const float lieHipY = frameIndex_ < 44 ? (120.0f + frameIndex_) : 190.0f;
+        const float lieShoulderY = frameIndex_ < 44 ? 60.0f : 195.0f;
+        ++frameIndex_;
+        return {
+            makeRulePose(90.0f, lieShoulderY, lieHipY, 0.95f),
+            makeRulePose(300.0f, 60.0f, 120.0f, 0.93f)
+        };
+    }
+
+private:
+    int frameIndex_ = 0;
 };
 
 void FallEndToEndStatusTest::publishesMonitoringStateWhenStartedWithoutModels() {
@@ -295,6 +409,137 @@ void FallEndToEndStatusTest::streamsClassificationBatchForMultiplePeople() {
 
     qunsetenv("RK_FALL_SOCKET_NAME");
     qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");
+}
+
+void FallEndToEndStatusTest::keepsBatchOrderLeftToRightAfterCrossing() {
+    QLocalServer analysisServer;
+    QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_e2e_cross.sock"));
+    QVERIFY(analysisServer.listen(QStringLiteral("/tmp/rk_video_analysis_e2e_cross.sock")));
+
+    qputenv("RK_FALL_SOCKET_NAME", QByteArray("/tmp/rk_fall_e2e_cross.sock"));
+    qputenv("RK_VIDEO_ANALYSIS_SOCKET_PATH", QByteArray("/tmp/rk_video_analysis_e2e_cross.sock"));
+    qputenv("RK_FALL_ACTION_BACKEND", QByteArray("rule_based"));
+
+    FallDaemonApp app(std::make_unique<CrossingPoseEstimatorStub>());
+    QVERIFY(app.start());
+    QVERIFY(analysisServer.waitForNewConnection(2000));
+    QLocalSocket *analysisSocket = analysisServer.nextPendingConnection();
+    QVERIFY(analysisSocket != nullptr);
+
+    QLocalSocket subscriber;
+    subscriber.connectToServer(QStringLiteral("/tmp/rk_fall_e2e_cross.sock"));
+    QVERIFY(subscriber.waitForConnected(2000));
+    subscriber.write("{\"action\":\"subscribe_classification\"}\n");
+    subscriber.flush();
+    QTest::qWait(50);
+
+    for (quint64 frameId = 1; frameId <= 50; ++frameId) {
+        AnalysisFramePacket packet;
+        packet.frameId = frameId;
+        packet.cameraId = QStringLiteral("front_cam");
+        packet.width = 640;
+        packet.height = 640;
+        packet.payload = QByteArray("jpeg-bytes");
+        analysisSocket->write(encodeAnalysisFramePacket(packet));
+        analysisSocket->flush();
+    }
+
+    QLocalSocket statusSocket;
+    statusSocket.connectToServer(QStringLiteral("/tmp/rk_fall_e2e_cross.sock"));
+    QVERIFY(statusSocket.waitForConnected(2000));
+    statusSocket.write("{\"action\":\"get_runtime_status\"}\n");
+    statusSocket.flush();
+    QTRY_VERIFY_WITH_TIMEOUT(statusSocket.bytesAvailable() > 0 || statusSocket.waitForReadyRead(50), 2000);
+    statusSocket.readAll();
+
+    QByteArray buffer;
+    bool sawOrderedCrossingBatch = false;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        const QJsonObject message = readJsonMessage(&subscriber, &buffer);
+        if (message.value(QStringLiteral("type")).toString() == QStringLiteral("classification_batch")) {
+            const QJsonArray results = message.value(QStringLiteral("results")).toArray();
+            if (results.size() == 2
+                && results.at(0).toObject().value(QStringLiteral("state")).toString() == QStringLiteral("monitoring")
+                && results.at(1).toObject().value(QStringLiteral("state")).toString() == QStringLiteral("lie")) {
+                sawOrderedCrossingBatch = true;
+                break;
+            }
+        }
+    }
+
+    QVERIFY(sawOrderedCrossingBatch);
+
+    qunsetenv("RK_FALL_SOCKET_NAME");
+    qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");
+    qunsetenv("RK_FALL_ACTION_BACKEND");
+}
+
+void FallEndToEndStatusTest::isolatesFallConfirmationPerTrackedPerson() {
+    QLocalServer analysisServer;
+    QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_e2e_isolated.sock"));
+    QVERIFY(analysisServer.listen(QStringLiteral("/tmp/rk_video_analysis_e2e_isolated.sock")));
+
+    qputenv("RK_FALL_SOCKET_NAME", QByteArray("/tmp/rk_fall_e2e_isolated.sock"));
+    qputenv("RK_VIDEO_ANALYSIS_SOCKET_PATH", QByteArray("/tmp/rk_video_analysis_e2e_isolated.sock"));
+    qputenv("RK_FALL_ACTION_BACKEND", QByteArray("rule_based"));
+
+    FallDaemonApp app(std::make_unique<MixedStatePoseEstimatorStub>());
+    QVERIFY(app.start());
+    QVERIFY(analysisServer.waitForNewConnection(2000));
+    QLocalSocket *analysisSocket = analysisServer.nextPendingConnection();
+    QVERIFY(analysisSocket != nullptr);
+
+    QLocalSocket subscriber;
+    subscriber.connectToServer(QStringLiteral("/tmp/rk_fall_e2e_isolated.sock"));
+    QVERIFY(subscriber.waitForConnected(2000));
+    subscriber.write("{\"action\":\"subscribe_classification\"}\n");
+    subscriber.flush();
+    QTest::qWait(50);
+
+    for (quint64 frameId = 1; frameId <= 50; ++frameId) {
+        AnalysisFramePacket packet;
+        packet.frameId = frameId;
+        packet.cameraId = QStringLiteral("front_cam");
+        packet.width = 640;
+        packet.height = 640;
+        packet.payload = QByteArray("jpeg-bytes");
+        analysisSocket->write(encodeAnalysisFramePacket(packet));
+        analysisSocket->flush();
+    }
+
+    QLocalSocket statusSocket;
+    statusSocket.connectToServer(QStringLiteral("/tmp/rk_fall_e2e_isolated.sock"));
+    QVERIFY(statusSocket.waitForConnected(2000));
+    statusSocket.write("{\"action\":\"get_runtime_status\"}\n");
+    statusSocket.flush();
+    QTRY_VERIFY_WITH_TIMEOUT(statusSocket.bytesAvailable() > 0 || statusSocket.waitForReadyRead(50), 2000);
+    statusSocket.readAll();
+
+    bool sawFallEvent = false;
+    bool sawMixedBatch = false;
+    QByteArray buffer;
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        const QJsonObject message = readJsonMessage(&subscriber, &buffer);
+        const QString type = message.value(QStringLiteral("type")).toString();
+        if (type == QStringLiteral("fall_event")) {
+            sawFallEvent = true;
+        }
+        if (type == QStringLiteral("classification_batch")) {
+            const QJsonArray results = message.value(QStringLiteral("results")).toArray();
+            if (results.size() == 2
+                && results.at(0).toObject().value(QStringLiteral("state")).toString() == QStringLiteral("lie")
+                && results.at(1).toObject().value(QStringLiteral("state")).toString() == QStringLiteral("monitoring")) {
+                sawMixedBatch = true;
+            }
+        }
+    }
+
+    QVERIFY(sawMixedBatch);
+    QVERIFY(sawFallEvent);
+
+    qunsetenv("RK_FALL_SOCKET_NAME");
+    qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");
+    qunsetenv("RK_FALL_ACTION_BACKEND");
 }
 
 QTEST_MAIN(FallEndToEndStatusTest)

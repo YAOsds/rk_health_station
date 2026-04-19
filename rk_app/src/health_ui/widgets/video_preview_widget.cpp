@@ -12,6 +12,7 @@ VideoPreviewWidget::VideoPreviewWidget(QWidget *parent)
     : QWidget(parent)
     , frameLabel_(new QLabel(QStringLiteral("Preview unavailable"), this))
     , overlayLabel_(new QLabel(QStringLiteral("Preview unavailable"), this))
+    , sourceBadgeLabel_(new QLabel(frameLabel_))
     , consumer_(new VideoPreviewConsumer(this))
 {
     auto *layout = new QVBoxLayout(this);
@@ -20,6 +21,14 @@ VideoPreviewWidget::VideoPreviewWidget(QWidget *parent)
     frameLabel_->setStyleSheet(QStringLiteral("background-color: #000; color: #ddd;"));
     layout->addWidget(frameLabel_, 1);
     layout->addWidget(overlayLabel_);
+
+    sourceBadgeLabel_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    sourceBadgeLabel_->setMargin(8);
+    sourceBadgeLabel_->setWordWrap(true);
+    sourceBadgeLabel_->setStyleSheet(
+        QStringLiteral("color: #ffffff; background-color: rgba(18, 18, 18, 190); "
+                       "border-radius: 10px; padding: 6px 10px; font: 700 16px;"));
+    sourceBadgeLabel_->hide();
 
     connect(consumer_, &VideoPreviewConsumer::frameReady, this, [this](const QImage &frame) {
         currentFrame_ = frame;
@@ -93,6 +102,16 @@ void VideoPreviewWidget::clearClassificationOverlay() {
     setClassificationRows({});
 }
 
+void VideoPreviewWidget::setSourceBadge(const QString &title, const QString &subtitle) {
+    const QString text = subtitle.isEmpty()
+        ? title
+        : QStringLiteral("%1\n%2").arg(title, subtitle);
+    sourceBadgeLabel_->setText(text);
+    sourceBadgeLabel_->setVisible(!text.isEmpty());
+    sourceBadgeLabel_->adjustSize();
+    updateSourceBadgeGeometry();
+}
+
 bool VideoPreviewWidget::hasRenderedFrame() const {
     return !currentFrame_.isNull();
 }
@@ -119,10 +138,15 @@ QStringList VideoPreviewWidget::classificationRows() const {
     return rows;
 }
 
+QString VideoPreviewWidget::sourceBadgeText() const {
+    return sourceBadgeLabel_->text();
+}
+
 void VideoPreviewWidget::resizeEvent(QResizeEvent *event) {
     QWidget::resizeEvent(event);
     renderFrame();
     updateClassificationGeometry();
+    updateSourceBadgeGeometry();
 }
 
 void VideoPreviewWidget::renderFrame() {
@@ -147,6 +171,18 @@ void VideoPreviewWidget::updateClassificationGeometry() {
         label->move(margin, y);
         y += label->height() + spacing;
     }
+}
+
+void VideoPreviewWidget::updateSourceBadgeGeometry() {
+    if (sourceBadgeLabel_ == nullptr || sourceBadgeLabel_->isHidden() || frameLabel_ == nullptr) {
+        return;
+    }
+    const int margin = 12;
+    sourceBadgeLabel_->adjustSize();
+    sourceBadgeLabel_->move(
+        qMax(margin, frameLabel_->width() - sourceBadgeLabel_->width() - margin),
+        margin);
+    sourceBadgeLabel_->raise();
 }
 
 void VideoPreviewWidget::applyClassificationStyle(

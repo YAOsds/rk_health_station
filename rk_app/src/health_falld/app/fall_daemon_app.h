@@ -5,7 +5,7 @@
 #include "pose/pose_estimator.h"
 #include "pose/pose_types.h"
 #include "runtime/runtime_config.h"
-#include "tracking/track_manager.h"
+#include "tracking/byte_tracker.h"
 
 #include <memory>
 #include <QObject>
@@ -29,7 +29,7 @@ private:
     std::unique_ptr<PoseEstimator> poseEstimator_;
     std::unique_ptr<ActionClassifier> actionClassifier_;
     FallDetectorService detectorService_;
-    TrackManager trackManager_;
+    ByteTracker tracker_;
     AnalysisStreamClient *ingestClient_ = nullptr;
     FallGateway *gateway_ = nullptr;
 };

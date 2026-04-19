@@ -11,6 +11,18 @@
 
 #include <memory>
 
+namespace {
+int validKeypointCount(const PosePerson &person) {
+    int count = 0;
+    for (const PoseKeypoint &keypoint : person.keypoints) {
+        if (keypoint.score > 0.0f) {
+            ++count;
+        }
+    }
+    return count;
+}
+}
+
 FallDaemonApp::FallDaemonApp(QObject *parent)
     : FallDaemonApp(std::make_unique<RknnPoseEstimator>(), parent) {
 }
@@ -21,7 +33,7 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
     , poseEstimator_(std::move(poseEstimator))
     , actionClassifier_(createActionClassifier(config_))
     , detectorService_(actionClassifier_.get())
-    , trackManager_(5, 10)
+    , tracker_(config_)
     , ingestClient_(new AnalysisStreamClient(config_.analysisSocketPath, this))
     , gateway_(new FallGateway(FallRuntimeStatus(), this)) {
     connect(ingestClient_, &AnalysisStreamClient::statusChanged, this, [this](bool connected) {
@@ -35,7 +47,7 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
             const QVector<PosePerson> people = poseEstimator_->infer(frame, &error);
             runtimeStatus_.lastInferTs = QDateTime::currentMSecsSinceEpoch();
             if (!error.isEmpty()) {
-                trackManager_.clear();
+                tracker_.clear();
                 runtimeStatus_.lastError = error;
                 runtimeStatus_.latestState = QStringLiteral("monitoring");
                 runtimeStatus_.latestConfidence = 0.0;
@@ -44,8 +56,7 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
             }
 
             runtimeStatus_.lastError.clear();
-            const QVector<TrackedPerson> tracks =
-                trackManager_.update(people, runtimeStatus_.lastInferTs);
+            QVector<TrackedPerson> &tracks = tracker_.update(people, runtimeStatus_.lastInferTs);
             if (tracks.isEmpty()) {
                 runtimeStatus_.latestState = QStringLiteral("monitoring");
                 runtimeStatus_.latestConfidence = 0.0;
@@ -64,15 +75,16 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
             double highestConfidence = 0.0;
             QString highestState = QStringLiteral("monitoring");
 
-            for (const TrackedPerson &track : tracks) {
-                if (track.missCount > 0 || track.latestPose.keypoints.size() < 17
-                    || !track.sequence.isFull()) {
+            for (TrackedPerson &track : tracks) {
+                if (track.state != ByteTrackState::Tracked
+                    || validKeypointCount(track.latestPose) < config_.minValidKeypoints
+                    || !track.action.sequence.isFull()) {
                     continue;
                 }
 
                 QString classifyError;
-                const FallDetectorResult result =
-                    detectorService_.update(track.sequence.values(), &classifyError);
+                const FallDetectorResult result = detectorService_.update(
+                    track.action.sequence.values(), &track.action.eventPolicy, &classifyError);
                 if (!classifyError.isEmpty()) {
                     runtimeStatus_.lastError = classifyError;
                     continue;
@@ -80,6 +92,12 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                 if (!result.hasClassification) {
                     continue;
                 }
+
+                track.action.lastState = result.classificationState;
+                track.action.lastConfidence = result.classificationConfidence;
+                track.lastClassificationState = result.classificationState;
+                track.lastClassificationConfidence = result.classificationConfidence;
+                track.hasFreshClassification = true;
 
                 FallClassificationEntry entry;
                 entry.state = result.classificationState;

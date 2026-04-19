@@ -12,6 +12,14 @@ struct FallRuntimeConfig {
     QString stgcnModelPath = QStringLiteral("assets/models/stgcn_fall.rknn");
     QString lstmModelPath = QStringLiteral("assets/models/lstm_fall.rknn");
     ActionBackendKind actionBackend = ActionBackendKind::LstmRknn;
+    int maxTracks = 5;
+    double trackHighThresh = 0.35;
+    double trackLowThresh = 0.10;
+    double newTrackThresh = 0.45;
+    double matchThresh = 0.80;
+    int lostTimeoutMs = 800;
+    int minValidKeypoints = 8;
+    double minBoxArea = 4096.0;
     int sequenceLength = 45;
     bool enabled = true;
 };

@@ -22,6 +22,8 @@ public:
     virtual void startRecording(const QString &cameraId) = 0;
     virtual void stopRecording(const QString &cameraId) = 0;
     virtual void setStorageDir(const QString &cameraId, const QString &storageDir) = 0;
+    virtual void startTestInput(const QString &cameraId, const QString &filePath) = 0;
+    virtual void stopTestInput(const QString &cameraId) = 0;
 
 signals:
     void statusReceived(const VideoChannelStatus &status);
@@ -40,6 +42,8 @@ public:
     void startRecording(const QString &cameraId) override;
     void stopRecording(const QString &cameraId) override;
     void setStorageDir(const QString &cameraId, const QString &storageDir) override;
+    void startTestInput(const QString &cameraId, const QString &filePath) override;
+    void stopTestInput(const QString &cameraId) override;
 
 private slots:
     void onReadyRead();

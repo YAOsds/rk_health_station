@@ -57,6 +57,16 @@ void VideoIpcClient::setStorageDir(const QString &cameraId, const QString &stora
     sendCommand(QStringLiteral("set_storage_dir"), cameraId, payload);
 }
 
+void VideoIpcClient::startTestInput(const QString &cameraId, const QString &filePath) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("file_path"), filePath);
+    sendCommand(QStringLiteral("start_test_input"), cameraId, payload);
+}
+
+void VideoIpcClient::stopTestInput(const QString &cameraId) {
+    sendCommand(QStringLiteral("stop_test_input"), cameraId);
+}
+
 void VideoIpcClient::onReadyRead() {
     readBuffer_.append(socket_->readAll());
 

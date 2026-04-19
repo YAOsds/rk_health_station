@@ -148,6 +148,13 @@ VideoCommandResult VideoGateway::route(const VideoCommand &command) const {
         return service_->applyStorageDir(
             command.cameraId, command.payload.value(QStringLiteral("storage_dir")).toString());
     }
+    if (command.action == QStringLiteral("start_test_input")) {
+        return service_->startTestInput(
+            command.cameraId, command.payload.value(QStringLiteral("file_path")).toString());
+    }
+    if (command.action == QStringLiteral("stop_test_input")) {
+        return service_->stopTestInput(command.cameraId);
+    }
 
     return buildErrorResult(command.action, command.requestId, command.cameraId,
         QStringLiteral("unsupported_action"));

@@ -12,6 +12,7 @@ public:
     GstreamerVideoPipelineBackend();
     ~GstreamerVideoPipelineBackend() override;
 
+    void setObserver(VideoPipelineObserver *observer) override;
     bool startPreview(const VideoChannelStatus &status, QString *previewUrl, QString *error) override;
     bool stopPreview(const QString &cameraId, QString *error) override;
     bool captureSnapshot(const VideoChannelStatus &status, const QString &outputPath, QString *error) override;
@@ -22,6 +23,7 @@ private:
     struct ActivePipeline {
         QProcess *process = nullptr;
         bool recording = false;
+        bool testInput = false;
         QString previewUrl;
     };
 
@@ -40,4 +42,5 @@ private:
     void stopAllPipelines();
 
     QHash<QString, ActivePipeline> pipelines_;
+    VideoPipelineObserver *observer_ = nullptr;
 };

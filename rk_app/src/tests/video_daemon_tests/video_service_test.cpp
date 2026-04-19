@@ -1,11 +1,17 @@
 #include "core/video_service.h"
 #include "pipeline/video_pipeline_backend.h"
 
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QtTest/QTest>
 
 class FakeVideoPipelineBackend : public VideoPipelineBackend {
 public:
+    void setObserver(VideoPipelineObserver *observer) override {
+        observer_ = observer;
+    }
+
     bool startPreview(const VideoChannelStatus &, QString *previewUrl, QString *error) override {
         *previewUrl = QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview");
         error->clear();
@@ -38,9 +44,18 @@ public:
         return true;
     }
 
+    void emitPlaybackFinished(const QString &cameraId) {
+        if (observer_ != nullptr) {
+            observer_->onPipelinePlaybackFinished(cameraId);
+        }
+    }
+
     bool previewRunning = false;
     QString activeRecordPath;
     QString lastSnapshotPath;
+
+private:
+    VideoPipelineObserver *observer_ = nullptr;
 };
 
 class VideoServiceTest : public QObject {
@@ -52,6 +67,9 @@ private slots:
     void startsRecordingAndUpdatesStatus();
     void stopsRecordingAndReturnsToPreviewing();
     void capturesSnapshotAndReturnsAbsolutePath();
+    void startsTestInputAndDisablesCameraOnlyOperations();
+    void keepsTestModeAfterPlaybackFinished();
+    void restoresCameraModeWhenStoppingTestInput();
 };
 
 void VideoServiceTest::usesDefaultStorageDirForFrontCamera() {
@@ -107,6 +125,61 @@ void VideoServiceTest::capturesSnapshotAndReturnsAbsolutePath() {
     QVERIFY(QFileInfo(path).isAbsolute());
     QVERIFY(path.endsWith(QStringLiteral(".jpg")));
     QCOMPARE(backend.lastSnapshotPath, path);
+}
+
+void VideoServiceTest::startsTestInputAndDisablesCameraOnlyOperations() {
+    FakeVideoPipelineBackend backend;
+    VideoService service(&backend);
+    const QString path = QDir::temp().filePath(QStringLiteral("fall-demo.mp4"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.close();
+
+    const VideoCommandResult result = service.startTestInput(QStringLiteral("front_cam"), path);
+    QVERIFY(result.ok);
+
+    const VideoChannelStatus status = service.statusForCamera(QStringLiteral("front_cam"));
+    QCOMPARE(status.inputMode, QStringLiteral("test_file"));
+    QCOMPARE(status.testFilePath, path);
+    QCOMPARE(status.testPlaybackState, QStringLiteral("playing"));
+    QCOMPARE(service.takeSnapshot(QStringLiteral("front_cam")).errorCode,
+        QStringLiteral("unsupported_in_test_mode"));
+    QCOMPARE(service.startRecording(QStringLiteral("front_cam")).errorCode,
+        QStringLiteral("unsupported_in_test_mode"));
+}
+
+void VideoServiceTest::keepsTestModeAfterPlaybackFinished() {
+    FakeVideoPipelineBackend backend;
+    VideoService service(&backend);
+    const QString path = QDir::temp().filePath(QStringLiteral("fall-demo.mp4"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.close();
+
+    QVERIFY(service.startTestInput(QStringLiteral("front_cam"), path).ok);
+    backend.emitPlaybackFinished(QStringLiteral("front_cam"));
+
+    const VideoChannelStatus status = service.statusForCamera(QStringLiteral("front_cam"));
+    QCOMPARE(status.inputMode, QStringLiteral("test_file"));
+    QCOMPARE(status.testPlaybackState, QStringLiteral("finished"));
+}
+
+void VideoServiceTest::restoresCameraModeWhenStoppingTestInput() {
+    FakeVideoPipelineBackend backend;
+    VideoService service(&backend);
+    const QString path = QDir::temp().filePath(QStringLiteral("fall-demo.mp4"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.close();
+
+    QVERIFY(service.startTestInput(QStringLiteral("front_cam"), path).ok);
+    const VideoCommandResult result = service.stopTestInput(QStringLiteral("front_cam"));
+    QVERIFY(result.ok);
+
+    const VideoChannelStatus status = service.statusForCamera(QStringLiteral("front_cam"));
+    QCOMPARE(status.inputMode, QStringLiteral("camera"));
+    QCOMPARE(status.testFilePath, QString());
+    QCOMPARE(status.testPlaybackState, QStringLiteral("idle"));
 }
 
 QTEST_MAIN(VideoServiceTest)

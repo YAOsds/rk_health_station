@@ -18,6 +18,10 @@ GstreamerVideoPipelineBackend::~GstreamerVideoPipelineBackend() {
     stopAllPipelines();
 }
 
+void GstreamerVideoPipelineBackend::setObserver(VideoPipelineObserver *observer) {
+    observer_ = observer;
+}
+
 bool GstreamerVideoPipelineBackend::startPreview(
     const VideoChannelStatus &status, QString *previewUrl, QString *error) {
     return startCommand(status.cameraId, buildPreviewCommand(status), false, previewUrl, error);
@@ -73,6 +77,19 @@ quint16 GstreamerVideoPipelineBackend::previewPortForCamera(const QString &camer
 }
 
 QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelStatus &status) const {
+    if (status.inputMode == QStringLiteral("test_file")) {
+        return QStringLiteral(
+            "%1 -e filesrc location=%2 ! qtdemux ! decodebin ! videoconvert ! videoscale ! "
+            "video/x-raw,width=%3,height=%4 ! jpegenc ! multipartmux boundary=%5 ! "
+            "tcpserversink host=127.0.0.1 port=%6")
+            .arg(shellQuote(gstLaunchBinary()))
+            .arg(shellQuote(status.testFilePath))
+            .arg(status.previewProfile.width)
+            .arg(status.previewProfile.height)
+            .arg(previewBoundaryForCamera(status.cameraId))
+            .arg(previewPortForCamera(status.cameraId));
+    }
+
     return QStringLiteral(
         "%1 -e v4l2src device=%2 ! "
         "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
@@ -142,6 +159,28 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
     process->setProgram(QStringLiteral("/bin/bash"));
     process->setArguments({QStringLiteral("-lc"), QStringLiteral("exec %1").arg(command)});
     process->setProcessChannelMode(QProcess::MergedChannels);
+    QObject::connect(process,
+        QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+        [this, cameraId, process](int exitCode, QProcess::ExitStatus exitStatus) {
+            if (!pipelines_.contains(cameraId) || pipelines_.value(cameraId).process != process) {
+                return;
+            }
+
+            const ActivePipeline pipeline = pipelines_.take(cameraId);
+            const bool testInput = pipeline.testInput;
+            delete process;
+
+            if (!observer_) {
+                return;
+            }
+            if (testInput && exitStatus == QProcess::NormalExit && exitCode == 0) {
+                observer_->onPipelinePlaybackFinished(cameraId);
+                return;
+            }
+            if (exitStatus != QProcess::NormalExit || exitCode != 0) {
+                observer_->onPipelineRuntimeError(cameraId, QStringLiteral("preview_pipeline_failed"));
+            }
+        });
     process->start();
     if (!process->waitForStarted(kStartTimeoutMs)) {
         if (error) {
@@ -164,8 +203,10 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
     ActivePipeline pipeline;
     pipeline.process = process;
     pipeline.recording = recording;
+    pipeline.testInput = false;
     pipeline.previewUrl = previewUrlForCamera(cameraId);
     pipelines_.insert(cameraId, pipeline);
+    pipelines_[cameraId].testInput = command.contains(QStringLiteral("filesrc location="));
 
     if (previewUrl) {
         *previewUrl = pipeline.previewUrl;

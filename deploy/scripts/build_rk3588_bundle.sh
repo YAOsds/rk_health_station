@@ -56,6 +56,7 @@ verify_path "${PROJECT_ROOT}/rk_app/CMakeLists.txt"
 verify_path "${RKNN_MODEL_ZOO_ROOT}/examples/yolov8_pose/model/yolov8n-pose.rknn"
 verify_path "${RKNN_MODEL_ZOO_ROOT}/examples/yolov8_pose/model/yolov8_pose_labels_list.txt"
 verify_path "${RKNN_MODEL_ZOO_ROOT}/yolo_detect/lstm/exports/lstm_fall.rknn"
+verify_path "${RKNN_MODEL_ZOO_ROOT}/yolo_detect/lstm/exports/lstm_fall_weights.json"
 verify_path "${RKNN_MODEL_ZOO_ROOT}/3rdparty/rknpu2/Linux/aarch64/librknnrt.so"
 
 cmake -S "${PROJECT_ROOT}/rk_app" \
@@ -129,6 +130,8 @@ install -m 644 "${RKNN_MODEL_ZOO_ROOT}/examples/yolov8_pose/model/yolov8n-pose.r
   "${BUNDLE_DIR}/assets/models/yolov8n-pose.rknn"
 install -m 644 "${RKNN_MODEL_ZOO_ROOT}/yolo_detect/lstm/exports/lstm_fall.rknn" \
   "${BUNDLE_DIR}/assets/models/lstm_fall.rknn"
+install -m 644 "${RKNN_MODEL_ZOO_ROOT}/yolo_detect/lstm/exports/lstm_fall_weights.json" \
+  "${BUNDLE_DIR}/assets/models/lstm_fall_weights.json"
 install -m 644 "${RKNN_MODEL_ZOO_ROOT}/examples/yolov8_pose/model/yolov8_pose_labels_list.txt" \
   "${BUNDLE_DIR}/model/yolov8_pose_labels_list.txt"
 if [[ -f "${RKNN_MODEL_ZOO_ROOT}/yolo_detect/stgcn/exports/stgcn_fall.onnx" ]]; then
@@ -145,6 +148,7 @@ RK_FALL_SOCKET_NAME=\${RK_FALL_SOCKET_NAME:-\${PWD}/run/rk_fall.sock}
 RK_FALL_POSE_MODEL_PATH=\${RK_FALL_POSE_MODEL_PATH:-\${PWD}/assets/models/yolov8n-pose.rknn}
 RK_FALL_ACTION_BACKEND=\${RK_FALL_ACTION_BACKEND:-lstm_rknn}
 RK_FALL_LSTM_MODEL_PATH=\${RK_FALL_LSTM_MODEL_PATH:-\${PWD}/assets/models/lstm_fall.rknn}
+RK_FALL_LSTM_WEIGHTS_PATH=\${RK_FALL_LSTM_WEIGHTS_PATH:-\${PWD}/assets/models/lstm_fall_weights.json}
 RK_FALL_STGCN_MODEL_PATH=\${RK_FALL_STGCN_MODEL_PATH:-\${PWD}/assets/models/stgcn_fall.rknn}
 RK_FALL_ACTION_MODEL_PATH=\${RK_FALL_ACTION_MODEL_PATH:-\${PWD}/assets/models/stgcn_fall.onnx}
 RK_VIDEO_ANALYSIS_ENABLED=\${RK_VIDEO_ANALYSIS_ENABLED:-1}

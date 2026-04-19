@@ -3,6 +3,10 @@
 #ifdef RKAPP_ENABLE_REAL_RKNN_ACTION
 #include "rknn_api.h"
 
+#include <QByteArray>
+#include <QDebug>
+
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #endif
@@ -16,6 +20,136 @@ struct RknnActionRuntime {
 };
 
 namespace {
+using HalfBits = uint16_t;
+
+QString tensorDimsString(const rknn_tensor_attr &attr) {
+    QStringList dims;
+    for (uint32_t i = 0; i < attr.n_dims; ++i) {
+        dims.push_back(QString::number(attr.dims[i]));
+    }
+    return QStringLiteral("[%1]").arg(dims.join(','));
+}
+
+void logTensorAttr(const char *prefix, const rknn_tensor_attr &attr) {
+    qInfo().noquote()
+        << QStringLiteral("%1 index=%2 name=%3 n_dims=%4 dims=%5 fmt=%6 type=%7 qnt=%8 zp=%9 scale=%10 elems=%11 size=%12")
+               .arg(QString::fromUtf8(prefix))
+               .arg(attr.index)
+               .arg(QString::fromUtf8(attr.name))
+               .arg(attr.n_dims)
+               .arg(tensorDimsString(attr))
+               .arg(attr.fmt)
+               .arg(attr.type)
+               .arg(attr.qnt_type)
+               .arg(attr.zp)
+               .arg(QString::number(attr.scale, 'g', 6))
+               .arg(attr.n_elems)
+               .arg(attr.size);
+}
+
+uint32_t floatBits(float value) {
+    uint32_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+float bitsToFloat(uint32_t bits) {
+    float value = 0.0f;
+    memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+float halfToFloat(HalfBits value) {
+    const uint32_t exponent = (value & 0x7C00u) >> 10;
+    const uint32_t mantissa = (value & 0x03FFu) << 13;
+    const uint32_t leading = floatBits(static_cast<float>(mantissa)) >> 23;
+    const uint32_t normalized = (exponent != 0u) ? ((exponent + 112u) << 23) | mantissa : 0u;
+    const uint32_t denormalized =
+        (exponent == 0u && mantissa != 0u)
+        ? ((leading - 37u) << 23) | ((mantissa << (150u - leading)) & 0x007FE000u)
+        : 0u;
+    return bitsToFloat(((value & 0x8000u) << 16) | normalized | denormalized);
+}
+
+HalfBits floatToHalf(float value) {
+    union {
+        uint32_t bits;
+        float value;
+    } storage;
+    storage.value = value;
+    const uint32_t sign = storage.bits & 0x80000000u;
+    storage.bits ^= sign;
+    HalfBits result = 0;
+
+    if (storage.bits >= 0x47800000u) {
+        result = static_cast<HalfBits>(storage.bits > 0x7f800000u ? 0x7e00u : 0x7c00u);
+    } else if (storage.bits < 0x38800000u) {
+        storage.value += 0.5f;
+        result = static_cast<HalfBits>(storage.bits - 0x3f000000u);
+    } else {
+        const uint32_t rounded = storage.bits + 0xc8000fffu;
+        result = static_cast<HalfBits>((rounded + ((storage.bits >> 13) & 1u)) >> 13);
+    }
+
+    result = static_cast<HalfBits>(result | (sign >> 16));
+    return result;
+}
+
+bool encodeInputTensor(const QVector<float> &input, const rknn_tensor_attr &inputAttr,
+    QByteArray *storage, rknn_input *rknnInput, QString *error) {
+    if (!storage || !rknnInput) {
+        if (error) {
+            *error = QStringLiteral("action_input_encode_failed");
+        }
+        return false;
+    }
+
+    if (inputAttr.type == RKNN_TENSOR_FLOAT32) {
+        rknnInput->type = RKNN_TENSOR_FLOAT32;
+        rknnInput->size = input.size() * static_cast<int>(sizeof(float));
+        rknnInput->buf = const_cast<float *>(input.constData());
+        return true;
+    }
+
+    if (inputAttr.type == RKNN_TENSOR_FLOAT16) {
+        storage->resize(input.size() * static_cast<int>(sizeof(HalfBits)));
+        auto *halves = reinterpret_cast<HalfBits *>(storage->data());
+        for (int index = 0; index < input.size(); ++index) {
+            halves[index] = floatToHalf(input[index]);
+        }
+        rknnInput->type = RKNN_TENSOR_FLOAT16;
+        rknnInput->size = storage->size();
+        rknnInput->buf = storage->data();
+        return true;
+    }
+
+    if (error) {
+        *error = QStringLiteral("action_input_type_unsupported_%1").arg(inputAttr.type);
+    }
+    return false;
+}
+
+QVector<float> decodeOutputTensor(const rknn_output &output, const rknn_tensor_attr &outputAttr) {
+    const int elementCount = outputAttr.n_elems > 0
+        ? static_cast<int>(outputAttr.n_elems)
+        : static_cast<int>(output.size / sizeof(float));
+    if (output.buf == nullptr || elementCount <= 0) {
+        return {};
+    }
+
+    QVector<float> result(elementCount);
+    if (outputAttr.type == RKNN_TENSOR_FLOAT16) {
+        const auto *halves = static_cast<const HalfBits *>(output.buf);
+        for (int index = 0; index < elementCount; ++index) {
+            result[index] = halfToFloat(halves[index]);
+        }
+        return result;
+    }
+
+    memcpy(result.data(), output.buf, elementCount * static_cast<int>(sizeof(float)));
+    return result;
+}
+
 void releaseRuntime(RknnActionRuntime *runtime) {
     if (!runtime) {
         return;
@@ -116,6 +250,20 @@ bool RknnActionModelRunner::loadModel(const QString &path, QString *error) {
             return false;
         }
     }
+
+    if (qEnvironmentVariableIsSet("RK_FALL_ACTION_DEBUG")) {
+        qInfo().noquote()
+            << QStringLiteral("loaded action model path=%1 inputs=%2 outputs=%3")
+                   .arg(path)
+                   .arg(runtime->ioNum.n_input)
+                   .arg(runtime->ioNum.n_output);
+        for (uint32_t i = 0; i < runtime->ioNum.n_input; ++i) {
+            logTensorAttr("action_input_attr", runtime->inputAttrs[i]);
+        }
+        for (uint32_t i = 0; i < runtime->ioNum.n_output; ++i) {
+            logTensorAttr("action_output_attr", runtime->outputAttrs[i]);
+        }
+    }
 #endif
 
     if (error) {
@@ -144,10 +292,11 @@ QVector<float> RknnActionModelRunner::infer(const QVector<float> &input, QString
     rknn_input rknnInput;
     memset(&rknnInput, 0, sizeof(rknnInput));
     rknnInput.index = 0;
-    rknnInput.type = RKNN_TENSOR_FLOAT32;
     rknnInput.fmt = runtime->inputAttrs[0].fmt;
-    rknnInput.size = input.size() * static_cast<int>(sizeof(float));
-    rknnInput.buf = const_cast<float *>(input.constData());
+    QByteArray encodedInput;
+    if (!encodeInputTensor(input, runtime->inputAttrs[0], &encodedInput, &rknnInput, error)) {
+        return {};
+    }
 
     int ret = rknn_inputs_set(runtime->ctx, runtime->ioNum.n_input, &rknnInput);
     if (ret < 0) {
@@ -169,7 +318,7 @@ QVector<float> RknnActionModelRunner::infer(const QVector<float> &input, QString
     memset(outputs.data(), 0, outputs.size() * sizeof(rknn_output));
     for (uint32_t i = 0; i < runtime->ioNum.n_output; ++i) {
         outputs[i].index = i;
-        outputs[i].want_float = 1;
+        outputs[i].want_float = runtime->outputAttrs[i].type == RKNN_TENSOR_FLOAT16 ? 0 : 1;
     }
 
     ret = rknn_outputs_get(runtime->ctx, runtime->ioNum.n_output, outputs.data(), nullptr);
@@ -182,11 +331,7 @@ QVector<float> RknnActionModelRunner::infer(const QVector<float> &input, QString
 
     QVector<float> result;
     if (!outputs.isEmpty() && outputs[0].buf != nullptr) {
-        const int elementCount = runtime->outputAttrs[0].n_elems > 0
-            ? static_cast<int>(runtime->outputAttrs[0].n_elems)
-            : static_cast<int>(outputs[0].size / sizeof(float));
-        result.resize(elementCount);
-        memcpy(result.data(), outputs[0].buf, elementCount * sizeof(float));
+        result = decodeOutputTensor(outputs[0], runtime->outputAttrs[0]);
     }
     rknn_outputs_release(runtime->ctx, runtime->ioNum.n_output, outputs.data());
 

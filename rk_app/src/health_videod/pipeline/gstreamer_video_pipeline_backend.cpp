@@ -79,9 +79,11 @@ quint16 GstreamerVideoPipelineBackend::previewPortForCamera(const QString &camer
 QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelStatus &status) const {
     if (status.inputMode == QStringLiteral("test_file")) {
         return QStringLiteral(
-            "%1 -e filesrc location=%2 ! qtdemux ! decodebin ! videoconvert ! videoscale ! "
+            "%1 -e filesrc location=%2 ! decodebin name=dec "
+            "dec. ! queue ! videoconvert ! videoscale ! "
             "video/x-raw,width=%3,height=%4 ! jpegenc ! multipartmux boundary=%5 ! "
-            "tcpserversink host=127.0.0.1 port=%6")
+            "tcpserversink host=127.0.0.1 port=%6 "
+            "dec. ! queue ! audioconvert ! audioresample ! fakesink sync=false")
             .arg(shellQuote(gstLaunchBinary()))
             .arg(shellQuote(status.testFilePath))
             .arg(status.previewProfile.width)

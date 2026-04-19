@@ -10,6 +10,7 @@ class GstreamerVideoPipelineBackendTest : public QObject {
 private slots:
     void rejectsPipelineThatExitsDuringPreviewStartup();
     void returnsTcpMjpegPreviewUrlForRunningPreview();
+    void usesGenericFileDecodePipelineForTestInput();
 };
 
 void GstreamerVideoPipelineBackendTest::rejectsPipelineThatExitsDuringPreviewStartup() {
@@ -85,6 +86,50 @@ void GstreamerVideoPipelineBackendTest::returnsTcpMjpegPreviewUrlForRunningPrevi
     const QString arguments = QString::fromUtf8(captured.readAll());
     QVERIFY(arguments.contains(QStringLiteral("multipartmux")));
     QVERIFY(arguments.contains(QStringLiteral("tcpserversink")));
+
+    qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
+}
+
+void GstreamerVideoPipelineBackendTest::usesGenericFileDecodePipelineForTestInput() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString capturePath = tempDir.filePath(QStringLiteral("launcher-args.txt"));
+    const QString launcherPath = tempDir.filePath(QStringLiteral("fake-gst-launch.sh"));
+    QFile launcher(launcherPath);
+    QVERIFY(launcher.open(QIODevice::WriteOnly | QIODevice::Text));
+    launcher.write(QStringLiteral(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$@\" > '%1'\n"
+        "sleep 2\n")
+            .arg(capturePath)
+            .toUtf8());
+    launcher.close();
+    QVERIFY(QFile::setPermissions(launcherPath,
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+    qputenv("RK_VIDEO_GST_LAUNCH_BIN", launcherPath.toUtf8());
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.inputMode = QStringLiteral("test_file");
+    status.testFilePath = QStringLiteral("/home/elf/Videos/video.mp4");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+
+    GstreamerVideoPipelineBackend backend;
+    QString previewUrl;
+    QString error;
+    QVERIFY(backend.startPreview(status, &previewUrl, &error));
+    QVERIFY(QFile::exists(capturePath));
+
+    QFile captured(capturePath);
+    QVERIFY(captured.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString arguments = QString::fromUtf8(captured.readAll());
+    QVERIFY(arguments.contains(QStringLiteral("decodebin")));
+    QVERIFY(arguments.contains(QStringLiteral("name=dec")));
+    QVERIFY(arguments.contains(QStringLiteral("audioconvert")));
+    QVERIFY(!arguments.contains(QStringLiteral("qtdemux")));
 
     qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
 }

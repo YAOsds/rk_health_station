@@ -26,6 +26,16 @@
 bash rk_health_station/deploy/scripts/build_rk3588_bundle.sh
 ```
 
+只编译 `rk_app`：
+
+```bash
+# 当前 Ubuntu 主机本地编译
+bash rk_health_station/deploy/scripts/build_rk_app.sh host
+
+# RK3588 交叉编译
+bash rk_health_station/deploy/scripts/build_rk_app.sh rk3588
+```
+
 默认输出目录：
 
 - `rk_health_station/out/rk3588_bundle`

@@ -8,6 +8,7 @@ class VideoPreviewWidgetTest : public QObject {
 private slots:
     void rendersMultipleClassificationRows();
     void rendersNoPersonRow();
+    void showsIndependentSourceBadge();
 };
 
 void VideoPreviewWidgetTest::rendersMultipleClassificationRows() {
@@ -31,6 +32,14 @@ void VideoPreviewWidgetTest::rendersNoPersonRow() {
     widget.setClassificationRows(rows);
 
     QCOMPARE(widget.classificationRows(), QStringList({QStringLiteral("no person")}));
+}
+
+void VideoPreviewWidgetTest::showsIndependentSourceBadge() {
+    VideoPreviewWidget widget;
+
+    widget.setSourceBadge(QStringLiteral("TEST MODE"), QStringLiteral("fall-demo.mp4"));
+
+    QCOMPARE(widget.sourceBadgeText(), QStringLiteral("TEST MODE\nfall-demo.mp4"));
 }
 
 QTEST_MAIN(VideoPreviewWidgetTest)

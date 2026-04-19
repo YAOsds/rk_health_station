@@ -4,6 +4,7 @@
 #include "protocol/video_ipc.h"
 #include "widgets/video_preview_widget.h"
 
+#include <functional>
 #include <QStringList>
 #include <QWidget>
 
@@ -18,17 +19,24 @@ class VideoMonitorPage : public QWidget {
     Q_OBJECT
 
 public:
+    using TestVideoPicker = std::function<QString()>;
+
     explicit VideoMonitorPage(
         AbstractVideoClient *client,
         AbstractFallClient *fallClient,
-        QWidget *parent = nullptr);
+        QWidget *parent = nullptr,
+        TestVideoPicker pickTestVideo = TestVideoPicker());
 
     QString cameraStateText() const;
     QString storageDirText() const;
+    QString inputModeText() const;
+    QString testFileText() const;
     QString previewOverlayText() const;
     QStringList previewOverlayRows() const;
+    QPushButton *takeSnapshotButton() const;
     QPushButton *startRecordingButton() const;
     QPushButton *stopRecordingButton() const;
+    QPushButton *exitTestModeButton() const;
 
 private slots:
     void onStatusReceived(const VideoChannelStatus &status);
@@ -41,6 +49,7 @@ private slots:
 private:
     static constexpr int kNoPersonOverlayTimeoutMs = 1500;
     static QString cameraStateLabel(VideoCameraState state);
+    static QString inputModeLabel(const VideoChannelStatus &status);
     static QString overlayTextForResult(const FallClassificationResult &result);
     static QVector<VideoPreviewWidget::ClassificationOverlayRow> overlayRowsForBatch(
         const FallClassificationBatch &batch);
@@ -57,6 +66,8 @@ private:
     bool hasFreshClassification_ = false;
     QLabel *cameraStateValue_ = nullptr;
     QLabel *storageDirValue_ = nullptr;
+    QLabel *inputModeValue_ = nullptr;
+    QLabel *testFileValue_ = nullptr;
     QLabel *lastSnapshotValue_ = nullptr;
     QLabel *currentRecordValue_ = nullptr;
     QLabel *lastErrorValue_ = nullptr;
@@ -64,8 +75,11 @@ private:
     QPushButton *takeSnapshotButton_ = nullptr;
     QPushButton *startRecordingButton_ = nullptr;
     QPushButton *stopRecordingButton_ = nullptr;
+    QPushButton *selectTestVideoButton_ = nullptr;
+    QPushButton *exitTestModeButton_ = nullptr;
     QPushButton *refreshStatusButton_ = nullptr;
     QPushButton *applyDirectoryButton_ = nullptr;
     VideoPreviewWidget *previewWidget_ = nullptr;
     QTimer *noPersonTimer_ = nullptr;
+    TestVideoPicker pickTestVideo_;
 };

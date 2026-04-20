@@ -63,8 +63,16 @@ QJsonObject fallClassificationBatchToJson(const FallClassificationBatch &batch) 
     QJsonArray results;
     for (const FallClassificationEntry &entry : batch.results) {
         QJsonObject item;
+        item.insert(QStringLiteral("track_id"), entry.trackId);
+        item.insert(QStringLiteral("icon_id"), entry.iconId);
         item.insert(QStringLiteral("state"), entry.state);
         item.insert(QStringLiteral("confidence"), entry.confidence);
+        item.insert(QStringLiteral("anchor_x"), entry.anchorX);
+        item.insert(QStringLiteral("anchor_y"), entry.anchorY);
+        item.insert(QStringLiteral("bbox_x"), entry.bboxX);
+        item.insert(QStringLiteral("bbox_y"), entry.bboxY);
+        item.insert(QStringLiteral("bbox_w"), entry.bboxW);
+        item.insert(QStringLiteral("bbox_h"), entry.bboxH);
         results.append(item);
     }
 
@@ -90,8 +98,16 @@ bool fallClassificationBatchFromJson(const QJsonObject &json, FallClassification
     for (const QJsonValue &value : results) {
         const QJsonObject object = value.toObject();
         FallClassificationEntry entry;
+        entry.trackId = object.value(QStringLiteral("track_id")).toInt(-1);
+        entry.iconId = object.value(QStringLiteral("icon_id")).toInt(-1);
         entry.state = object.value(QStringLiteral("state")).toString();
         entry.confidence = object.value(QStringLiteral("confidence")).toDouble();
+        entry.anchorX = object.value(QStringLiteral("anchor_x")).toDouble();
+        entry.anchorY = object.value(QStringLiteral("anchor_y")).toDouble();
+        entry.bboxX = object.value(QStringLiteral("bbox_x")).toDouble();
+        entry.bboxY = object.value(QStringLiteral("bbox_y")).toDouble();
+        entry.bboxW = object.value(QStringLiteral("bbox_w")).toDouble();
+        entry.bboxH = object.value(QStringLiteral("bbox_h")).toDouble();
         if (entry.state.isEmpty()) {
             return false;
         }

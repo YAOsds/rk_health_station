@@ -218,6 +218,7 @@ void VideoMonitorPage::onClassificationUpdated(const FallClassificationResult &r
     batch.results.push_back(entry);
     hasFreshClassification_ = true;
     previewWidget_->setClassificationRows(overlayRowsForBatch(batch));
+    previewWidget_->setOverlayEntries({});
     refreshNoPersonTimer();
 }
 
@@ -231,6 +232,19 @@ void VideoMonitorPage::onClassificationBatchUpdated(const FallClassificationBatc
 
     hasFreshClassification_ = !batch.results.isEmpty();
     previewWidget_->setClassificationRows(overlayRowsForBatch(batch));
+
+    QVector<VideoPreviewWidget::OverlayEntry> overlayEntries;
+    overlayEntries.reserve(batch.results.size());
+    for (const FallClassificationEntry &entry : batch.results) {
+        VideoPreviewWidget::OverlayEntry overlay;
+        overlay.iconId = entry.iconId;
+        overlay.state = entry.state;
+        overlay.confidence = entry.confidence;
+        overlay.anchor = QPointF(entry.anchorX, entry.anchorY);
+        overlay.bbox = QRectF(entry.bboxX, entry.bboxY, entry.bboxW, entry.bboxH);
+        overlayEntries.push_back(overlay);
+    }
+    previewWidget_->setOverlayEntries(overlayEntries);
     refreshNoPersonTimer();
 }
 

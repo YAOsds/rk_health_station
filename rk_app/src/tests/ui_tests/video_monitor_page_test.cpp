@@ -129,6 +129,11 @@ void VideoMonitorPageTest::showsMultiPersonClassificationOverlay() {
 
     QCOMPARE(page.previewOverlayRows(),
         QStringList({QStringLiteral("[1] stand 0.91"), QStringLiteral("[2] fall 0.96")}));
+
+    VideoPreviewWidget *previewWidget = page.findChild<VideoPreviewWidget *>();
+    QVERIFY(previewWidget != nullptr);
+    QCOMPARE(previewWidget->overlayEntries().size(), 2);
+    QCOMPARE(previewWidget->overlayEntries().first().iconId, 1);
 }
 
 void VideoMonitorPageTest::doesNotShowNoPersonWhileClassificationIsStillWarmingUp() {

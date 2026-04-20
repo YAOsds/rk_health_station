@@ -406,6 +406,15 @@ void FallEndToEndStatusTest::streamsClassificationBatchForMultiplePeople() {
     const QJsonObject json = QJsonDocument::fromJson(subscriber.readAll().trimmed()).object();
     QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("classification_batch"));
     QVERIFY(json.value(QStringLiteral("person_count")).toInt() >= 2);
+    const QJsonArray results = json.value(QStringLiteral("results")).toArray();
+    QVERIFY(results.size() >= 2);
+    const QJsonObject first = results.first().toObject();
+    QVERIFY(first.contains(QStringLiteral("track_id")));
+    QVERIFY(first.contains(QStringLiteral("icon_id")));
+    QVERIFY(first.contains(QStringLiteral("anchor_x")));
+    QVERIFY(first.contains(QStringLiteral("anchor_y")));
+    QVERIFY(first.contains(QStringLiteral("bbox_x")));
+    QVERIFY(first.contains(QStringLiteral("bbox_h")));
 
     qunsetenv("RK_FALL_SOCKET_NAME");
     qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");

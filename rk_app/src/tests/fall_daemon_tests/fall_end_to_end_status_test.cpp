@@ -3,6 +3,7 @@
 
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -18,6 +19,7 @@ private slots:
     void updatesInferTimestampAfterFrameArrives();
     void startsWithRuleBackendWhenConfiguredExplicitly();
     void streamsClassificationAfterWindowFills();
+    void streamsClassificationBatchForSinglePerson();
     void streamsClassificationBatchForMultiplePeople();
     void keepsBatchOrderLeftToRightAfterCrossing();
     void isolatesFallConfirmationPerTrackedPerson();
@@ -64,6 +66,20 @@ QJsonObject readJsonMessage(QLocalSocket *socket, QByteArray *buffer, int timeou
                 buffer->remove(0, newlineIndex + 1);
                 return QJsonDocument::fromJson(line).object();
             }
+        }
+    }
+    return {};
+}
+
+QJsonObject waitForMessageType(QLocalSocket *socket, const QString &type, int timeoutMs = 2000) {
+    QByteArray buffer;
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMs) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
+        const QJsonObject message = readJsonMessage(socket, &buffer, 50);
+        if (message.value(QStringLiteral("type")).toString() == type) {
+            return message;
         }
     }
     return {};
@@ -361,10 +377,61 @@ void FallEndToEndStatusTest::streamsClassificationAfterWindowFills() {
         analysisSocket->flush();
     }
 
-    QTRY_VERIFY_WITH_TIMEOUT(subscriber.bytesAvailable() > 0 || subscriber.waitForReadyRead(50), 2000);
-    const QJsonObject json = QJsonDocument::fromJson(subscriber.readAll().trimmed()).object();
-    QCOMPARE(json.value(QStringLiteral("type")).toString(), QStringLiteral("classification"));
-    QVERIFY(!json.value(QStringLiteral("state")).toString().isEmpty());
+    const QJsonObject classificationMessage =
+        waitForMessageType(&subscriber, QStringLiteral("classification"));
+
+    QCOMPARE(classificationMessage.value(QStringLiteral("type")).toString(), QStringLiteral("classification"));
+    QVERIFY(!classificationMessage.value(QStringLiteral("state")).toString().isEmpty());
+
+    qunsetenv("RK_FALL_SOCKET_NAME");
+    qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");
+}
+
+void FallEndToEndStatusTest::streamsClassificationBatchForSinglePerson() {
+    QLocalServer analysisServer;
+    QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_e2e_single_batch.sock"));
+    QVERIFY(analysisServer.listen(QStringLiteral("/tmp/rk_video_analysis_e2e_single_batch.sock")));
+
+    qputenv("RK_FALL_SOCKET_NAME", QByteArray("/tmp/rk_fall_e2e_single_batch.sock"));
+    qputenv("RK_VIDEO_ANALYSIS_SOCKET_PATH", QByteArray("/tmp/rk_video_analysis_e2e_single_batch.sock"));
+
+    FallDaemonApp app(std::make_unique<SinglePoseEstimator>());
+    QVERIFY(app.start());
+    QVERIFY(analysisServer.waitForNewConnection(2000));
+    QLocalSocket *analysisSocket = analysisServer.nextPendingConnection();
+    QVERIFY(analysisSocket != nullptr);
+
+    QLocalSocket subscriber;
+    subscriber.connectToServer(QStringLiteral("/tmp/rk_fall_e2e_single_batch.sock"));
+    QVERIFY(subscriber.waitForConnected(2000));
+    subscriber.write("{\"action\":\"subscribe_classification\"}\n");
+    subscriber.flush();
+    QTest::qWait(50);
+
+    for (quint64 frameId = 1; frameId <= 45; ++frameId) {
+        AnalysisFramePacket packet;
+        packet.frameId = frameId;
+        packet.cameraId = QStringLiteral("front_cam");
+        packet.width = 640;
+        packet.height = 640;
+        packet.payload = QByteArray("jpeg-bytes");
+        analysisSocket->write(encodeAnalysisFramePacket(packet));
+        analysisSocket->flush();
+    }
+
+    const QJsonObject batchMessage =
+        waitForMessageType(&subscriber, QStringLiteral("classification_batch"));
+
+    QCOMPARE(batchMessage.value(QStringLiteral("person_count")).toInt(), 1);
+    const QJsonArray results = batchMessage.value(QStringLiteral("results")).toArray();
+    QCOMPARE(results.size(), 1);
+    const QJsonObject first = results.first().toObject();
+    QVERIFY(first.contains(QStringLiteral("track_id")));
+    QVERIFY(first.contains(QStringLiteral("icon_id")));
+    QVERIFY(first.contains(QStringLiteral("anchor_x")));
+    QVERIFY(first.contains(QStringLiteral("anchor_y")));
+    QVERIFY(first.contains(QStringLiteral("bbox_x")));
+    QVERIFY(first.contains(QStringLiteral("bbox_h")));
 
     qunsetenv("RK_FALL_SOCKET_NAME");
     qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");

@@ -183,7 +183,9 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                            .arg(classification.state)
                            .arg(QString::number(classification.confidence, 'f', 3))
                            .arg(classification.timestampMs);
-            } else if (!batch.results.isEmpty()) {
+            }
+
+            if (!batch.results.isEmpty()) {
                 gateway_->publishClassificationBatch(batch);
                 QStringList states;
                 for (const FallClassificationEntry &entry : batch.results) {

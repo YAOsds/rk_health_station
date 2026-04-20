@@ -6,6 +6,7 @@
 #include "pose/pose_types.h"
 #include "runtime/runtime_config.h"
 #include "tracking/byte_tracker.h"
+#include "tracking/track_trace_logger.h"
 
 #include <memory>
 #include <QObject>
@@ -30,6 +31,7 @@ private:
     std::unique_ptr<ActionClassifier> actionClassifier_;
     FallDetectorService detectorService_;
     ByteTracker tracker_;
+    TrackTraceLogger trackTraceLogger_;
     AnalysisStreamClient *ingestClient_ = nullptr;
     FallGateway *gateway_ = nullptr;
 };

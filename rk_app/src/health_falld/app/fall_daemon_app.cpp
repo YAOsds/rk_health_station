@@ -34,6 +34,7 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
     , actionClassifier_(createActionClassifier(config_))
     , detectorService_(actionClassifier_.get())
     , tracker_(config_)
+    , trackTraceLogger_(config_.trackTracePath)
     , ingestClient_(new AnalysisStreamClient(config_.analysisSocketPath, this))
     , gateway_(new FallGateway(FallRuntimeStatus(), this)) {
     connect(ingestClient_, &AnalysisStreamClient::statusChanged, this, [this](bool connected) {
@@ -64,6 +65,8 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                 batch.cameraId = config_.cameraId;
                 batch.timestampMs = runtimeStatus_.lastInferTs;
                 gateway_->publishClassificationBatch(batch);
+                trackTraceLogger_.appendFrame(
+                    frame, runtimeStatus_.lastInferTs, config_.cameraId, tracks, {});
                 gateway_->setRuntimeStatus(runtimeStatus_);
                 return;
             }
@@ -71,11 +74,13 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
             FallClassificationBatch batch;
             batch.cameraId = config_.cameraId;
             batch.timestampMs = runtimeStatus_.lastInferTs;
+            QVector<TrackTraceEvent> traceEvents;
 
             double highestConfidence = 0.0;
             QString highestState = QStringLiteral("monitoring");
 
             for (TrackedPerson &track : tracks) {
+                track.hasFreshClassification = false;
                 if (track.state != ByteTrackState::Tracked
                     || validKeypointCount(track.latestPose) < config_.minValidKeypoints
                     || !track.action.sequence.isFull()) {
@@ -113,6 +118,8 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                     FallEvent event = *result.event;
                     event.cameraId = config_.cameraId;
                     event.tsConfirm = runtimeStatus_.lastInferTs;
+                    traceEvents.push_back(
+                        {track.trackId, event.eventType, event.confidence});
                     gateway_->publishEvent(event);
                     qInfo().noquote()
                         << QStringLiteral("fall_event camera=%1 type=%2 confidence=%3 ts=%4")
@@ -154,6 +161,9 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                            .arg(states.join(','))
                            .arg(batch.timestampMs);
             }
+
+            trackTraceLogger_.appendFrame(
+                frame, runtimeStatus_.lastInferTs, config_.cameraId, tracks, traceEvents);
 
             gateway_->setRuntimeStatus(runtimeStatus_);
         });

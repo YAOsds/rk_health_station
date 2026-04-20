@@ -58,6 +58,8 @@ add_executable(health-falld
     tracking/kalman_filter.h
     tracking/track_manager.cpp
     tracking/track_manager.h
+    tracking/track_trace_logger.cpp
+    tracking/track_trace_logger.h
     tracking/tracked_person.h
     runtime/runtime_config.cpp
     runtime/runtime_config.h

@@ -126,6 +126,7 @@ add_executable(byte_tracker_test
     ../health_falld/tracking/association.cpp
     ../health_falld/tracking/byte_tracker.cpp
     ../health_falld/tracking/kalman_filter.cpp
+    ../health_falld/tracking/track_trace_logger.cpp
     ../health_falld/runtime/runtime_config.cpp
 )
 
@@ -169,6 +170,29 @@ target_link_libraries(track_action_context_test PRIVATE
 )
 
 add_test(NAME track_action_context_test COMMAND track_action_context_test)
+
+add_executable(track_trace_logger_test
+    fall_daemon_tests/track_trace_logger_test.cpp
+    ../health_falld/tracking/track_trace_logger.cpp
+)
+
+set_target_properties(track_trace_logger_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(track_trace_logger_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(track_trace_logger_test PRIVATE
+    rk_shared
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME track_trace_logger_test COMMAND track_trace_logger_test)
 
 add_executable(protocol_codec_test
     protocol_tests/protocol_codec_test.cpp
@@ -895,6 +919,7 @@ add_executable(fall_end_to_end_status_test
     ../health_falld/tracking/association.cpp
     ../health_falld/tracking/byte_tracker.cpp
     ../health_falld/tracking/kalman_filter.cpp
+    ../health_falld/tracking/track_trace_logger.cpp
     ../health_falld/runtime/runtime_config.cpp
 )
 

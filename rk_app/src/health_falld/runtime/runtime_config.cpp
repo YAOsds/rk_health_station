@@ -55,6 +55,11 @@ FallRuntimeConfig loadFallRuntimeConfig() {
         config.lstmModelPath = lstmModelPath;
     }
 
+    const QString trackTracePath = qEnvironmentVariable("RK_FALL_TRACK_TRACE_PATH");
+    if (!trackTracePath.isEmpty()) {
+        config.trackTracePath = trackTracePath;
+    }
+
     const QString actionBackend = qEnvironmentVariable("RK_FALL_ACTION_BACKEND");
     if (!actionBackend.isEmpty()) {
         config.actionBackend = parseActionBackend(actionBackend);

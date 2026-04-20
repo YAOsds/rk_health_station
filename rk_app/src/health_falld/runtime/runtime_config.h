@@ -11,6 +11,7 @@ struct FallRuntimeConfig {
     QString poseModelPath = QStringLiteral("assets/models/yolov8n-pose.rknn");
     QString stgcnModelPath = QStringLiteral("assets/models/stgcn_fall.rknn");
     QString lstmModelPath = QStringLiteral("assets/models/lstm_fall.rknn");
+    QString trackTracePath;
     ActionBackendKind actionBackend = ActionBackendKind::LstmRknn;
     int maxTracks = 5;
     double trackHighThresh = 0.35;

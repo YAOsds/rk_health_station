@@ -6,6 +6,8 @@
 #include "nvs_flash.h"
 #include "provisioning_portal.h"
 #include "system_diag.h"
+#include "tcp_client.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "APP_CTRL";
 
@@ -37,5 +39,17 @@ void app_controller_run(void)
         return;
     }
 
-    ESP_LOGI(TAG, "config present for device_id=%s, waiting for next-stage networking", config.device_id);
+    system_diag_set_stage(SYSTEM_DIAG_STAGE_WIFI);
+    if (wifi_manager_start(&config) != ESP_OK || !wifi_manager_is_connected()) {
+        ESP_LOGW(TAG, "wifi not ready yet");
+        return;
+    }
+
+    ESP_ERROR_CHECK(tcp_client_configure(config.server_ip, (uint16_t)config.server_port));
+    ESP_LOGI(TAG,
+        "wifi connected ip=%s rssi=%d, tcp host configured to %s:%d",
+        wifi_manager_get_ip(),
+        wifi_manager_get_rssi(),
+        config.server_ip,
+        config.server_port);
 }

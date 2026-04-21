@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "driver/gpio.h"
-#include "driver/i2c.h"
+#include "driver/i2c_types.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 typedef struct {
-    i2c_port_t i2c_port;
+    i2c_port_num_t i2c_port;
     gpio_num_t i2c_sda_pin;
     gpio_num_t i2c_scl_pin;
     gpio_num_t led_pin_1;

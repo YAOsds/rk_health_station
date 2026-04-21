@@ -1,6 +1,7 @@
 #include "tcp_client.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 #include <sys/time.h>
 
@@ -25,6 +26,27 @@ static esp_err_t recv_exact(uint8_t *buffer, size_t len)
         received_total += (size_t)received;
     }
 
+    return ESP_OK;
+}
+
+void tcp_client_encode_frame_header(size_t len, uint8_t header[4])
+{
+    header[0] = (uint8_t)((len >> 24) & 0xFF);
+    header[1] = (uint8_t)((len >> 16) & 0xFF);
+    header[2] = (uint8_t)((len >> 8) & 0xFF);
+    header[3] = (uint8_t)(len & 0xFF);
+}
+
+esp_err_t tcp_client_encode_frame_checked(size_t len, uint8_t header[4])
+{
+    if (header == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (len == 0 || len > UINT32_MAX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    tcp_client_encode_frame_header(len, header);
     return ESP_OK;
 }
 
@@ -80,6 +102,7 @@ esp_err_t tcp_client_connect(void)
 esp_err_t tcp_client_disconnect(void)
 {
     if (s_socket_fd >= 0) {
+        shutdown(s_socket_fd, SHUT_RDWR);
         close(s_socket_fd);
         s_socket_fd = -1;
     }
@@ -102,11 +125,9 @@ esp_err_t tcp_client_send_frame(const char *json, size_t len)
     if (tcp_client_connect() != ESP_OK) {
         return ESP_FAIL;
     }
-
-    header[0] = (uint8_t)((len >> 24) & 0xFF);
-    header[1] = (uint8_t)((len >> 16) & 0xFF);
-    header[2] = (uint8_t)((len >> 8) & 0xFF);
-    header[3] = (uint8_t)(len & 0xFF);
+    if (tcp_client_encode_frame_checked(len, header) != ESP_OK) {
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     if (send(s_socket_fd, header, sizeof(header), 0) != (ssize_t)sizeof(header)) {
         ESP_LOGE(TAG, "send header failed: errno=%d", errno);

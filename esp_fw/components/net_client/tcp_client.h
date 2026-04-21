@@ -10,6 +10,9 @@
 extern "C" {
 #endif
 
+void tcp_client_encode_frame_header(size_t len, uint8_t header[4]);
+esp_err_t tcp_client_encode_frame_checked(size_t len, uint8_t header[4]);
+
 esp_err_t tcp_client_configure(const char *server_ip, uint16_t server_port);
 esp_err_t tcp_client_connect(void);
 esp_err_t tcp_client_disconnect(void);

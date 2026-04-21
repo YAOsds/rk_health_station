@@ -3,9 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-grep -q "idf.py build" README.md
-grep -q "AP provisioning" README.md
-grep -q "serial_capture.sh" README.md
+PYTHON_BIN="../.venv-imu/bin/python"
+if [ ! -x "$PYTHON_BIN" ]; then
+    PYTHON_BIN="python3"
+fi
+
+"$PYTHON_BIN" -m pytest ml/imu_fall_model/tests -q
 
 . ~/esp/esp-idf/export.sh >/tmp/esp_export.log
 idf.py build

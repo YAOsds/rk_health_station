@@ -32,6 +32,11 @@ DeviceEnvelope buildSmokeEnvelope(qint64 seq) {
     envelope.deviceId = QStringLiteral("smoke_watch_001");
     envelope.payload.insert(QStringLiteral("hr"), 72);
     envelope.payload.insert(QStringLiteral("spo2"), 98);
+    envelope.payload.insert(QStringLiteral("imu_fall_valid"), true);
+    envelope.payload.insert(QStringLiteral("imu_fall_class"), 2);
+    envelope.payload.insert(QStringLiteral("imu_nonfall_prob"), 0.02);
+    envelope.payload.insert(QStringLiteral("imu_preimpact_prob"), 0.08);
+    envelope.payload.insert(QStringLiteral("imu_fall_prob"), 0.90);
     return envelope;
 }
 

@@ -22,11 +22,19 @@ void SharedModelsContractTest::telemetrySampleContract() {
     sample.battery = 87;
     sample.rssi = -58;
     sample.wearState = QStringLiteral("worn");
+    sample.imuFallValid = true;
+    sample.imuFallClass = 2;
+    sample.imuNonFallProb = 0.02;
+    sample.imuPreImpactProb = 0.08;
+    sample.imuFallProb = 0.90;
 
     QCOMPARE(sample.deviceId, QStringLiteral("watch_001"));
     QCOMPARE(sample.sampleTime, qint64(1712345678));
     QCOMPARE(sample.heartRate, 72);
     QCOMPARE(sample.battery, 87);
+    QCOMPARE(sample.imuFallValid, true);
+    QCOMPARE(sample.imuFallClass, 2);
+    QCOMPARE(sample.imuFallProb, 0.90);
 
     TelemetryBatch batch;
     batch.deviceId = sample.deviceId;
@@ -34,6 +42,7 @@ void SharedModelsContractTest::telemetrySampleContract() {
     QCOMPARE(batch.deviceId, QStringLiteral("watch_001"));
     QCOMPARE(batch.samples.size(), 1);
     QCOMPARE(batch.samples.at(0).wearState, QStringLiteral("worn"));
+    QCOMPARE(batch.samples.at(0).imuPreImpactProb, 0.08);
 }
 
 void SharedModelsContractTest::deviceIdentityContract() {

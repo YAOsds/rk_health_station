@@ -13,7 +13,10 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "fall_classifier.h"
 #include "heart_rate_algo.h"
+#include "imu_event_state.h"
+#include "imu_window_buffer.h"
 #include "led_status.h"
 #include "max30102.h"
 #include "mpu6050.h"
@@ -123,8 +126,16 @@ static void sensor_task(void *arg)
     size_t motion_count = 0;
     int64_t next_telemetry_ms = monotonic_ms() + (int64_t)board->telemetry_period_ms;
     int64_t next_mpu_ms = monotonic_ms();
+    imu_window_buffer_t imu_buffer = {0};
+    imu_event_state_t imu_state = {0};
+    telemetry_imu_fall_t latest_imu_fall = {0};
+    float imu_window[256][6] = {{0}};
+    bool fall_classifier_ready = false;
 
     (void)arg;
+
+    imu_window_buffer_init(&imu_buffer, 256, 32);
+    imu_event_state_init(&imu_state, 2);
 
     while (true) {
         max30102_sample_t ppg_sample = {0};
@@ -161,6 +172,13 @@ static void sensor_task(void *arg)
                 continue;
             }
             ESP_LOGI(TAG, "mpu6050 streaming at %lu ms/sample", (unsigned long)board->mpu6050_period_ms);
+            if (!fall_classifier_ready) {
+                if (fall_classifier_init() == ESP_OK) {
+                    fall_classifier_ready = true;
+                } else {
+                    ESP_LOGW(TAG, "fall classifier init failed, IMU model disabled");
+                }
+            }
         }
 
         if (max30102_read_sample(max_handle, &ppg_sample) != ESP_OK) {
@@ -188,6 +206,36 @@ static void sensor_task(void *arg)
                 continue;
             }
             append_float(accel_norm_samples, MOTION_HISTORY_CAPACITY, &motion_count, motion_sample.accel_norm_g);
+            if (fall_classifier_ready) {
+                imu_sample6_t imu_sample = {
+                    .values = {
+                        motion_sample.accel_x_g,
+                        motion_sample.accel_y_g,
+                        motion_sample.accel_z_g,
+                        motion_sample.gyro_x_dps,
+                        motion_sample.gyro_y_dps,
+                        motion_sample.gyro_z_dps,
+                    },
+                };
+                if (imu_window_buffer_push(&imu_buffer, &imu_sample)) {
+                    fall_classifier_result_t cls = {0};
+                    imu_window_buffer_copy_latest(&imu_buffer, imu_window);
+                    if (fall_classifier_run(imu_window, &cls) == ESP_OK) {
+                        imu_event_state_update(&imu_state, &cls);
+                        latest_imu_fall.valid = true;
+                        latest_imu_fall.label = imu_event_state_current_label(&imu_state);
+                        latest_imu_fall.non_fall_prob = cls.probabilities[0];
+                        latest_imu_fall.pre_impact_prob = cls.probabilities[1];
+                        latest_imu_fall.fall_prob = cls.probabilities[2];
+                        ESP_LOGI(TAG,
+                            "imu_fall class=%d probs=[%.3f %.3f %.3f]",
+                            (int)latest_imu_fall.label,
+                            (double)latest_imu_fall.non_fall_prob,
+                            (double)latest_imu_fall.pre_impact_prob,
+                            (double)latest_imu_fall.fall_prob);
+                    }
+                }
+            }
             next_mpu_ms = now_ms + (int64_t)board->mpu6050_period_ms;
         }
 
@@ -207,6 +255,7 @@ static void sensor_task(void *arg)
 
             vitals.acceleration = quality.motion_level;
             vitals.finger_detected = quality.finger_detected;
+            vitals.imu_fall = latest_imu_fall;
             if (heart_rate_algo_compute(&quality, &hr_result) == ESP_OK) {
                 vitals.heart_rate = hr_result.heart_rate_bpm;
                 vitals.spo2 = hr_result.spo2_percent;
@@ -271,7 +320,7 @@ static void telemetry_task(void *arg)
 {
     const board_config_t *board = board_config_get();
     uint32_t seq = 1;
-    char frame[512];
+    char frame[768];
 
     (void)arg;
 

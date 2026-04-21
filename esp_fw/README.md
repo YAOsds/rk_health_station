@@ -10,6 +10,7 @@ Standalone ESP-IDF firmware for the ESP32-S3 side of `rk_health_station`.
 - authenticates with `auth_hello -> auth_challenge -> auth_proof -> auth_result`
 - samples MAX30102 and MPU6050 on the real hardware path by default
 - computes `heart_rate`, `spo2`, `acceleration`, and `finger_detected`
+- assembles rolling MPU6050 windows and emits a three-class IMU fall state
 - uploads telemetry frames to the RK3588 backend
 - drives dual LEDs to show boot / provisioning / Wi-Fi / pending approval / streaming / fault states
 
@@ -20,6 +21,17 @@ cd esp_fw
 . ~/esp/esp-idf/export.sh
 idf.py build
 ```
+
+## IMU fall classifier
+
+```bash
+bash tools/run_imu_model_pipeline.sh
+cd esp_fw
+. ~/esp/esp-idf/export.sh
+idf.py build
+```
+
+This refreshes `models/imu_fall_waist_3class.espdl` before rebuilding the firmware.
 
 ## Flash
 
@@ -60,7 +72,7 @@ After saving the form, the device stores config in NVS and reboots into STA mode
 bash tools/run_host_checks.sh
 ```
 
-This checks the operator docs and runs a full `idf.py build`.
+This runs the Python-side IMU model tests and then a full `idf.py build`.
 
 ## Helpful scripts
 
@@ -71,4 +83,5 @@ This checks the operator docs and runs a full `idf.py build`.
 ## More docs
 
 - `docs/esp-firmware-architecture.md`
+- `docs/esp-imu-fall-validation-report.md`
 - `docs/esp-provisioning-guide.md`

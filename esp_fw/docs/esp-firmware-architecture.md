@@ -36,6 +36,9 @@ The ESP firmware is split into small components and a thin `main/` orchestration
 - `mpu6050`: accelerometer / gyro driver using ESP-IDF 6 I2C master API
 - `signal_filter`: window analysis, finger detection, signal confidence, motion estimate
 - `heart_rate_algo`: converts analyzed signal quality into vital-sign outputs
+- `imu_window_buffer`: keeps a rolling `256 x 6` IMU tensor with stride-based emission
+- `fall_classifier`: wraps the on-device IMU fall classifier interface
+- `imu_event_state`: smooths consecutive fall windows before telemetry emission
 
 ### UI feedback
 
@@ -48,7 +51,9 @@ The ESP firmware is split into small components and a thin `main/` orchestration
 - initializes MAX30102 and MPU6050
 - samples real sensor data continuously
 - keeps a rolling PPG window and motion history
+- keeps a rolling IMU window for the fall classifier
 - computes `heart_rate`, `spo2`, `acceleration`, `finger_detected`
+- computes `imu_fall_valid`, `imu_fall_class`, and the three class probabilities
 - publishes the latest computed vitals into shared runtime state
 
 ### `link_task`
@@ -69,11 +74,13 @@ The ESP firmware is split into small components and a thin `main/` orchestration
 1. MAX30102 raw PPG + MPU6050 motion samples enter `sensor_task`.
 2. `signal_filter` derives signal quality and motion level.
 3. `heart_rate_algo` converts quality metrics into heart rate / SpO2 outputs.
-4. `telemetry_task` packages those outputs with device metadata.
-5. `telemetry_uploader` authenticates and pushes the data to RK3588 `healthd`.
+4. `imu_window_buffer` and `fall_classifier` derive a three-class IMU fall state.
+5. `telemetry_task` packages those outputs with device metadata.
+6. `telemetry_uploader` authenticates and pushes the data to RK3588 `healthd`.
 
 ## Debugging signals
 
 - serial logs annotate boot, Wi-Fi state, sensor init, telemetry send, and auth outcomes
+- serial logs also print `imu_fall class=<n> probs=[p0 p1 p2]` after each emitted IMU window
 - `system_diag` keeps retry counters plus latest signal confidence / motion level
 - `led_status` gives physical visibility into the current lifecycle state

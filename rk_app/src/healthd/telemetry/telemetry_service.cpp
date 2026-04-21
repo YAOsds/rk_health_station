@@ -93,6 +93,24 @@ bool TelemetryService::handleTelemetry(const DeviceEnvelope &envelope, const QSt
     if (readString(payload, {QStringLiteral("wear_state"), QStringLiteral("wear")}, &stringValue)) {
         sample.wearState = stringValue;
     }
+    if (readBool(payload, {QStringLiteral("imu_fall_valid")}, &boolValue)) {
+        sample.imuFallValid = boolValue;
+    }
+    foundInvalid = false;
+    if (readInt(payload, {QStringLiteral("imu_fall_class")}, &intValue, &foundInvalid)) {
+        sample.imuFallClass = intValue;
+    } else if (foundInvalid) {
+        return false;
+    }
+    if (readDouble(payload, {QStringLiteral("imu_nonfall_prob")}, &doubleValue)) {
+        sample.imuNonFallProb = doubleValue;
+    }
+    if (readDouble(payload, {QStringLiteral("imu_preimpact_prob")}, &doubleValue)) {
+        sample.imuPreImpactProb = doubleValue;
+    }
+    if (readDouble(payload, {QStringLiteral("imu_fall_prob")}, &doubleValue)) {
+        sample.imuFallProb = doubleValue;
+    }
     row.sample = sample;
 
     bool ok = true;

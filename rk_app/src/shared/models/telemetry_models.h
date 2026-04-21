@@ -14,6 +14,11 @@ struct TelemetrySample {
     int battery = 0;
     int rssi = 0;
     QString wearState;
+    bool imuFallValid = false;
+    int imuFallClass = -1;
+    double imuNonFallProb = 0.0;
+    double imuPreImpactProb = 0.0;
+    double imuFallProb = 0.0;
 };
 
 struct TelemetryBatch {

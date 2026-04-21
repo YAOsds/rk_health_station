@@ -61,7 +61,9 @@ esp_err_t telemetry_uploader_build_frame(const char *device_id, const char *devi
     written = snprintf(buffer, buffer_len,
         "{\"ver\":1,\"type\":\"telemetry_batch\",\"seq\":%" PRIu32 ",\"ts\":%lld,"
         "\"device_id\":\"%s\",\"payload\":{\"heart_rate\":%d,\"spo2\":%.1f,"
-        "\"acceleration\":%.3f,\"finger_detected\":%d,\"firmware_version\":\"%s\","
+        "\"acceleration\":%.3f,\"finger_detected\":%d,\"imu_fall_valid\":%d,"
+        "\"imu_fall_class\":%d,\"imu_nonfall_prob\":%.5f,\"imu_preimpact_prob\":%.5f,"
+        "\"imu_fall_prob\":%.5f,\"firmware_version\":\"%s\","
         "\"device_name\":\"%s\"}}",
         seq,
         (long long)ts,
@@ -70,6 +72,11 @@ esp_err_t telemetry_uploader_build_frame(const char *device_id, const char *devi
         (double)vitals->spo2,
         (double)vitals->acceleration,
         vitals->finger_detected ? 1 : 0,
+        vitals->imu_fall.valid ? 1 : 0,
+        (int)vitals->imu_fall.label,
+        (double)vitals->imu_fall.non_fall_prob,
+        (double)vitals->imu_fall.pre_impact_prob,
+        (double)vitals->imu_fall.fall_prob,
         firmware_version,
         device_name);
     if (written <= 0 || (size_t)written >= buffer_len) {

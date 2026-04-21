@@ -7,16 +7,26 @@
 #include "auth_client.h"
 #include "device_config.h"
 #include "esp_err.h"
+#include "fall_classifier.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct {
+    bool valid;
+    imu_fall_class_t label;
+    float non_fall_prob;
+    float pre_impact_prob;
+    float fall_prob;
+} telemetry_imu_fall_t;
+
+typedef struct {
     int heart_rate;
     float spo2;
     float acceleration;
     bool finger_detected;
+    telemetry_imu_fall_t imu_fall;
 } telemetry_vitals_t;
 
 esp_err_t telemetry_uploader_init(const rk_device_config_t *config, const char *firmware_version);

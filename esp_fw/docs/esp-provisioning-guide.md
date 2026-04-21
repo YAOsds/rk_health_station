@@ -18,7 +18,7 @@ The LEDs indicate provisioning mode with the provisioning blink pattern.
 
 ## Step 2: Fill the form
 
-Enter all of the following:
+The page refreshes the nearby Wi-Fi list automatically every 3 seconds. Pick one SSID from the dropdown, then enter:
 
 - `wifi_ssid`
 - `wifi_password`
@@ -44,6 +44,7 @@ Use serial logs to verify the sequence:
 2. TCP target configured
 3. auth result is `ok`, `registration_required`, or `rejected`
 4. telemetry starts if auth becomes active
+5. while waiting in provisioning mode, a heartbeat log appears every 3 seconds with AP client count and the latest scan summary
 
 Recommended command:
 
@@ -51,6 +52,8 @@ Recommended command:
 cd esp_fw
 bash tools/serial_capture.sh /dev/ttyACM0 /tmp/esp_fw-session.log
 ```
+
+If your USB adapter enumerates as `/dev/ttyUSB0`, replace the port accordingly. If `idf.py monitor` reports that the path is "not readable", the usual cause is Linux serial-device permissions rather than firmware logic: check `ls -l /dev/ttyUSB0`, confirm your user is in the `dialout` group, then re-login.
 
 ## Expected auth outcomes
 

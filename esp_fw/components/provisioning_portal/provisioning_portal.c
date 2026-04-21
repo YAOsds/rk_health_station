@@ -16,23 +16,22 @@
 #include "freertos/task.h"
 #include "provisioning_html.h"
 #include "provisioning_scan.h"
+#include "provisioning_status.h"
 
 static const char *TAG = "PROVISION";
 enum {
     PROVISION_SCAN_LIMIT = 20,
 };
 
-typedef struct {
-    size_t last_scan_count;
-    int last_scan_best_rssi;
-    char last_scan_best_ssid[RK_PROVISIONING_SCAN_SSID_LEN];
-} provisioning_runtime_t;
-
 static httpd_handle_t s_server;
 static esp_netif_t *s_ap_netif;
 static bool s_net_ready;
 static bool s_wifi_started;
-static provisioning_runtime_t s_runtime;
+static bool s_wifi_events_registered;
+static esp_event_handler_instance_t s_wifi_event_instance;
+static TaskHandle_t s_heartbeat_task;
+static portMUX_TYPE s_runtime_lock = portMUX_INITIALIZER_UNLOCKED;
+static rk_provisioning_status_t s_runtime;
 
 static void url_decode(char *buffer)
 {
@@ -128,6 +127,87 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, RK_PROVISIONING_HTML);
 }
 
+static void snapshot_runtime(rk_provisioning_status_t *snapshot)
+{
+    taskENTER_CRITICAL(&s_runtime_lock);
+    *snapshot = s_runtime;
+    taskEXIT_CRITICAL(&s_runtime_lock);
+}
+
+static void provisioning_heartbeat_task(void *arg)
+{
+    char message[160];
+    rk_provisioning_status_t snapshot;
+
+    (void)arg;
+
+    while (true) {
+        snapshot_runtime(&snapshot);
+        if (rk_provisioning_format_heartbeat(&snapshot, message, sizeof(message))) {
+            ESP_LOGI(TAG, "%s", message);
+        }
+        vTaskDelay(pdMS_TO_TICKS(RK_PROVISIONING_HEARTBEAT_INTERVAL_MS));
+    }
+}
+
+static esp_err_t start_heartbeat_task(void)
+{
+    if (s_heartbeat_task != NULL) {
+        return ESP_OK;
+    }
+
+    if (xTaskCreate(provisioning_heartbeat_task, "prov_heartbeat", 3072, NULL, 5, &s_heartbeat_task) != pdPASS) {
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+static void stop_heartbeat_task(void)
+{
+    if (s_heartbeat_task != NULL) {
+        vTaskDelete(s_heartbeat_task);
+        s_heartbeat_task = NULL;
+    }
+}
+
+static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    size_t clients = 0;
+
+    (void)arg;
+
+    if (event_base != WIFI_EVENT) {
+        return;
+    }
+
+    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+        const wifi_event_ap_staconnected_t *event = (const wifi_event_ap_staconnected_t *)event_data;
+
+        taskENTER_CRITICAL(&s_runtime_lock);
+        ++s_runtime.connected_clients;
+        clients = s_runtime.connected_clients;
+        taskEXIT_CRITICAL(&s_runtime_lock);
+
+        ESP_LOGI(TAG, "provisioning client connected aid=%d clients=%u",
+            event != NULL ? event->aid : -1,
+            (unsigned)clients);
+    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        const wifi_event_ap_stadisconnected_t *event = (const wifi_event_ap_stadisconnected_t *)event_data;
+
+        taskENTER_CRITICAL(&s_runtime_lock);
+        if (s_runtime.connected_clients > 0) {
+            --s_runtime.connected_clients;
+        }
+        clients = s_runtime.connected_clients;
+        taskEXIT_CRITICAL(&s_runtime_lock);
+
+        ESP_LOGI(TAG, "provisioning client disconnected aid=%d clients=%u",
+            event != NULL ? event->aid : -1,
+            (unsigned)clients);
+    }
+}
+
 static esp_err_t scan_get_handler(httpd_req_t *req)
 {
     wifi_scan_config_t scan_config = {
@@ -167,19 +247,25 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
         return httpd_resp_sendstr(req, "[]");
     }
 
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.last_scan_count = normalized;
     if (normalized > 0) {
         strncpy(s_runtime.last_scan_best_ssid, output[0].ssid, sizeof(s_runtime.last_scan_best_ssid) - 1);
         s_runtime.last_scan_best_rssi = output[0].rssi;
+    } else {
+        s_runtime.last_scan_best_ssid[0] = '\0';
+        s_runtime.last_scan_best_rssi = 0;
+    }
+    taskEXIT_CRITICAL(&s_runtime_lock);
+
+    if (normalized > 0) {
         ESP_LOGI(TAG,
             "scan complete aps=%u normalized=%u strongest=%s rssi=%d",
             (unsigned)ap_count,
             (unsigned)normalized,
-            s_runtime.last_scan_best_ssid,
-            s_runtime.last_scan_best_rssi);
+            output[0].ssid,
+            output[0].rssi);
     } else {
-        s_runtime.last_scan_best_ssid[0] = '\0';
-        s_runtime.last_scan_best_rssi = 0;
         ESP_LOGI(TAG, "scan complete aps=%u normalized=0", (unsigned)ap_count);
     }
 
@@ -268,6 +354,15 @@ static esp_err_t start_softap(void)
         s_wifi_started = true;
     }
 
+    if (!s_wifi_events_registered) {
+        ret = esp_event_handler_instance_register(
+            WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &s_wifi_event_instance);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        s_wifi_events_registered = true;
+    }
+
     esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     snprintf(ssid, sizeof(ssid), "RKHealth-%02X%02X", mac[4], mac[5]);
 
@@ -339,6 +434,14 @@ esp_err_t provisioning_portal_start(void)
     httpd_register_uri_handler(s_server, &root_uri);
     httpd_register_uri_handler(s_server, &scan_uri);
     httpd_register_uri_handler(s_server, &save_uri);
+
+    ret = start_heartbeat_task();
+    if (ret != ESP_OK) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        return ret;
+    }
+
     ESP_LOGI(TAG, "provisioning portal started on http://192.168.4.1/");
     return ESP_OK;
 }
@@ -350,8 +453,16 @@ esp_err_t provisioning_portal_stop(void)
         s_server = NULL;
     }
 
+    stop_heartbeat_task();
+
+    if (s_wifi_events_registered) {
+        esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_wifi_event_instance);
+        s_wifi_events_registered = false;
+    }
+
     if (s_wifi_started) {
         esp_wifi_stop();
+        s_wifi_started = false;
     }
 
     return ESP_OK;

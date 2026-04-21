@@ -139,7 +139,11 @@ Required fields in the provisioning form:
 - `device_name`
 - `device_secret`
 
+The portal scans nearby APs automatically and refreshes the SSID dropdown every 3 seconds; users only select a discovered SSID and enter the password.
+
 After saving the form, the device stores config in NVS and reboots into STA mode.
+
+While the device is waiting in provisioning mode, serial logs emit a heartbeat every 3 seconds with the current AP client count and latest Wi-Fi scan summary.
 
 ## Local verification
 
@@ -147,7 +151,7 @@ After saving the form, the device stores config in NVS and reboots into STA mode
 bash tools/run_host_checks.sh
 ```
 
-This runs the Python-side IMU model tests and then a full `idf.py build`.
+This runs the Python-side IMU model tests, provisioning host-side checks, and then a full `idf.py build`.
 
 ## Helpful scripts
 

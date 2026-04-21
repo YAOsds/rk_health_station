@@ -29,6 +29,8 @@ typedef struct {
 
 void system_diag_init(void);
 void system_diag_set_stage(system_diag_stage_t stage);
+void system_diag_note_wifi_retry(void);
+void system_diag_note_auth_failure(const char *error);
 void system_diag_note_signal_quality(float confidence, bool finger_detected, float motion_level);
 esp_err_t system_diag_get_snapshot(system_diag_snapshot_t *snapshot);
 

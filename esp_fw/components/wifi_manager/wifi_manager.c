@@ -134,9 +134,12 @@ esp_err_t wifi_manager_start(const rk_device_config_t *config)
     }
 
     ret = esp_wifi_start();
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "wifi start failed: %s", esp_err_to_name(ret));
         return ret;
+    }
+    if (ret == ESP_ERR_INVALID_STATE) {
+        esp_wifi_connect();
     }
 
     bits = xEventGroupWaitBits(s_wifi_events,

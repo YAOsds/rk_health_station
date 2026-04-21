@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define SIGNAL_FILTER_MAX_SAMPLES 128
+#define SIGNAL_FILTER_MAX_SAMPLES 256
 #define SIGNAL_FILTER_FINGER_THRESHOLD 7000.0f
 
 typedef struct {

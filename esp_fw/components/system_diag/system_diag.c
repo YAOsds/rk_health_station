@@ -4,6 +4,17 @@
 
 static system_diag_snapshot_t s_snapshot;
 
+static void set_last_error(const char *error)
+{
+    if (error == NULL) {
+        s_snapshot.last_error[0] = '\0';
+        return;
+    }
+
+    strncpy(s_snapshot.last_error, error, sizeof(s_snapshot.last_error) - 1);
+    s_snapshot.last_error[sizeof(s_snapshot.last_error) - 1] = '\0';
+}
+
 void system_diag_init(void)
 {
     memset(&s_snapshot, 0, sizeof(s_snapshot));
@@ -13,6 +24,17 @@ void system_diag_init(void)
 void system_diag_set_stage(system_diag_stage_t stage)
 {
     s_snapshot.stage = stage;
+}
+
+void system_diag_note_wifi_retry(void)
+{
+    ++s_snapshot.wifi_retries;
+}
+
+void system_diag_note_auth_failure(const char *error)
+{
+    ++s_snapshot.auth_failures;
+    set_last_error(error);
 }
 
 void system_diag_note_signal_quality(float confidence, bool finger_detected, float motion_level)

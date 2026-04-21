@@ -69,3 +69,6 @@ esp_fw/sdkconfig
 # OS files
 .DS_Store
 Thumbs.db
+.venv-imu/
+esp_fw/managed_components/
+esp_fw/sdkconfig.old

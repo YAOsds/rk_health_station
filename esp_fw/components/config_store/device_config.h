@@ -1,6 +1,13 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
+
+#include "esp_err.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define RK_WIFI_SSID_LEN 64
 #define RK_WIFI_PASSWORD_LEN 64
@@ -25,3 +32,12 @@ typedef enum {
     AUTH_REJECTED,
     AUTH_RETRY,
 } auth_client_result_t;
+
+void rk_device_config_clear(rk_device_config_t *config);
+bool rk_device_config_is_complete(const rk_device_config_t *config);
+esp_err_t rk_device_config_load(rk_device_config_t *config);
+esp_err_t rk_device_config_save(const rk_device_config_t *config);
+
+#ifdef __cplusplus
+}
+#endif

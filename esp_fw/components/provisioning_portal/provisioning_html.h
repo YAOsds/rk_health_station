@@ -1,0 +1,24 @@
+#pragma once
+
+static const char *RK_PROVISIONING_HTML =
+    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+    "<title>RK Health Station Provisioning</title>"
+    "<style>body{font-family:sans-serif;margin:0;background:#f2f5f8;color:#142031;}"
+    "main{max-width:720px;margin:0 auto;padding:24px;}"
+    ".card{background:#fff;padding:24px;border-radius:18px;box-shadow:0 14px 40px rgba(20,32,49,.08);}"
+    "h1{margin-top:0;}label{display:block;margin-top:14px;font-weight:700;}"
+    "input{width:100%%;padding:12px;margin-top:6px;border:1px solid #cfd8e3;border-radius:10px;box-sizing:border-box;}"
+    "button{margin-top:22px;width:100%%;padding:14px;border:0;border-radius:12px;background:#0f766e;color:#fff;font-size:16px;font-weight:700;}"
+    "small{display:block;margin-top:6px;color:#58677d;}</style></head><body><main><div class=\"card\">"
+    "<h1>ESP32-S3 配网</h1><p>一次性写入 Wi-Fi 与 RK3588 TCP 鉴权参数。</p>"
+    "<form method=\"POST\" action=\"/save\">"
+    "<label>Wi-Fi SSID<input name=\"wifi_ssid\" maxlength=\"63\" required></label>"
+    "<label>Wi-Fi Password<input name=\"wifi_password\" type=\"password\" maxlength=\"63\" required></label>"
+    "<label>RK3588 Host<input name=\"server_ip\" value=\"192.168.137.1\" maxlength=\"63\" required></label>"
+    "<label>RK3588 Port<input name=\"server_port\" value=\"19001\" type=\"number\" min=\"1\" max=\"65535\" required></label>"
+    "<label>Device ID<input name=\"device_id\" value=\"watch_001\" maxlength=\"63\" required></label>"
+    "<label>Device Name<input name=\"device_name\" value=\"RK Watch 01\" maxlength=\"63\" required></label>"
+    "<label>Device Secret<input name=\"device_secret\" type=\"password\" maxlength=\"127\" required></label>"
+    "<small>保存后设备会自动重启并进入正常工作流。</small>"
+    "<button type=\"submit\">保存并重启</button></form></div></main></body></html>";

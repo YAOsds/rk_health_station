@@ -15,12 +15,24 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "provisioning_html.h"
+#include "provisioning_scan.h"
 
 static const char *TAG = "PROVISION";
+enum {
+    PROVISION_SCAN_LIMIT = 20,
+};
+
+typedef struct {
+    size_t last_scan_count;
+    int last_scan_best_rssi;
+    char last_scan_best_ssid[RK_PROVISIONING_SCAN_SSID_LEN];
+} provisioning_runtime_t;
+
 static httpd_handle_t s_server;
 static esp_netif_t *s_ap_netif;
 static bool s_net_ready;
 static bool s_wifi_started;
+static provisioning_runtime_t s_runtime;
 
 static void url_decode(char *buffer)
 {
@@ -116,6 +128,65 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, RK_PROVISIONING_HTML);
 }
 
+static esp_err_t scan_get_handler(httpd_req_t *req)
+{
+    wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = false,
+    };
+    wifi_ap_record_t ap_records[PROVISION_SCAN_LIMIT] = {0};
+    rk_provisioning_scan_ap_t input[PROVISION_SCAN_LIMIT] = {0};
+    rk_provisioning_scan_ap_t output[PROVISION_SCAN_LIMIT] = {0};
+    uint16_t ap_count = PROVISION_SCAN_LIMIT;
+    size_t normalized;
+    uint16_t i;
+    char json[2048] = {0};
+
+    if (esp_wifi_scan_start(&scan_config, true) != ESP_OK) {
+        ESP_LOGW(TAG, "wifi scan start failed");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "[]");
+    }
+
+    if (esp_wifi_scan_get_ap_records(&ap_count, ap_records) != ESP_OK) {
+        ESP_LOGW(TAG, "wifi scan collect failed");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "[]");
+    }
+
+    for (i = 0; i < ap_count; ++i) {
+        strncpy(input[i].ssid, (const char *)ap_records[i].ssid, sizeof(input[i].ssid) - 1);
+        input[i].rssi = ap_records[i].rssi;
+    }
+
+    normalized = rk_provisioning_normalize_scan_results(input, ap_count, output, PROVISION_SCAN_LIMIT);
+    if (!rk_provisioning_build_scan_json(output, normalized, json, sizeof(json))) {
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "[]");
+    }
+
+    s_runtime.last_scan_count = normalized;
+    if (normalized > 0) {
+        strncpy(s_runtime.last_scan_best_ssid, output[0].ssid, sizeof(s_runtime.last_scan_best_ssid) - 1);
+        s_runtime.last_scan_best_rssi = output[0].rssi;
+        ESP_LOGI(TAG,
+            "scan complete aps=%u normalized=%u strongest=%s rssi=%d",
+            (unsigned)ap_count,
+            (unsigned)normalized,
+            s_runtime.last_scan_best_ssid,
+            s_runtime.last_scan_best_rssi);
+    } else {
+        s_runtime.last_scan_best_ssid[0] = '\0';
+        s_runtime.last_scan_best_rssi = 0;
+        ESP_LOGI(TAG, "scan complete aps=%u normalized=0", (unsigned)ap_count);
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, json);
+}
+
 static esp_err_t save_post_handler(httpd_req_t *req)
 {
     char body[768];
@@ -207,7 +278,9 @@ static esp_err_t start_softap(void)
     wifi_config.ap.max_connection = 4;
     wifi_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
 
-    ret = esp_wifi_set_mode(WIFI_MODE_AP);
+    memset(&s_runtime, 0, sizeof(s_runtime));
+
+    ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "set ap mode failed: %s", esp_err_to_name(ret));
         return ret;
@@ -237,6 +310,11 @@ esp_err_t provisioning_portal_start(void)
         .method = HTTP_GET,
         .handler = root_get_handler,
     };
+    httpd_uri_t scan_uri = {
+        .uri = "/scan",
+        .method = HTTP_GET,
+        .handler = scan_get_handler,
+    };
     httpd_uri_t save_uri = {
         .uri = "/save",
         .method = HTTP_POST,
@@ -259,6 +337,7 @@ esp_err_t provisioning_portal_start(void)
     }
 
     httpd_register_uri_handler(s_server, &root_uri);
+    httpd_register_uri_handler(s_server, &scan_uri);
     httpd_register_uri_handler(s_server, &save_uri);
     ESP_LOGI(TAG, "provisioning portal started on http://192.168.4.1/");
     return ESP_OK;

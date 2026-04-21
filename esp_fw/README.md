@@ -38,6 +38,7 @@ This refreshes `models/imu_fall_waist_3class.espdl` before rebuilding the firmwa
 ```bash
 cd esp_fw
 . ~/esp/esp-idf/export.sh
+idf.py -p /dev/ttyACM0 erase_flash # clear flash
 idf.py -p /dev/ttyACM0 flash
 ```
 
@@ -46,6 +47,80 @@ idf.py -p /dev/ttyACM0 flash
 ```bash
 bash tools/serial_capture.sh /dev/ttyACM0 /tmp/esp_fw-session.log
 ```
+
+You can also flash and open the serial monitor in one step:
+
+```bash
+cd esp_fw
+. ~/esp/esp-idf/export.sh
+idf.py -p /dev/ttyACM0 flash monitor
+```
+
+Exit the monitor with `Ctrl + ]`.
+
+## Debugging on board
+
+Recommended bring-up and debug flow:
+
+1. Enter the firmware directory and load ESP-IDF:
+
+```bash
+cd esp_fw
+. ~/esp/esp-idf/export.sh
+```
+
+2. Check the board serial port:
+
+```bash
+ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
+```
+
+Use the actual serial device shown above in later commands. Many boards appear as
+`/dev/ttyACM0`, while CH340-based boards often appear as `/dev/ttyUSB0`.
+
+3. Rebuild and flash:
+
+```bash
+idf.py build
+idf.py -p /dev/ttyACM0 flash monitor
+```
+
+4. Watch the serial log for these key checkpoints:
+
+- model loaded:
+  - `FALL_CLS: esp-dl model loaded successfully`
+- IMU inference is active:
+  - `imu_fall class=<0|1|2> probs=[...]`
+- networking is active:
+  - `wifi connected ...`
+  - `auth ...`
+  - `telemetry sent ...`
+
+5. Interpret the IMU classes as:
+
+- `class=0`: `non_fall`
+- `class=1`: `pre_impact`
+- `class=2`: `fall`
+
+6. Recommended motion test sequence:
+
+- keep the board still or walk normally and confirm it is mostly `class=0`
+- do a fast imbalance / crouch / pre-drop motion and check whether `class=1` appears
+- simulate a fall or rapid lay-down and check whether `class=2` probability rises clearly
+
+7. If you only want to validate the on-device IMU model, you do not need the full RK3588 link first. The minimum success criteria are:
+
+- `FALL_CLS: esp-dl model loaded successfully`
+- repeated `imu_fall class=... probs=[...]` lines after the rolling IMU window fills
+
+Common failure hints:
+
+- no `esp-dl model loaded successfully`:
+  - the embedded `.espdl` artifact is missing, empty, or failed to load
+- no `imu_fall class=...` lines:
+  - the MPU6050 path is not producing data yet, or the rolling 256-sample window is not full
+- repeated Wi-Fi / auth retry logs:
+  - the local model may still be running, but the RK3588 uplink path is not ready
 
 ## AP provisioning
 

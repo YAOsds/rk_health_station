@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -19,11 +21,15 @@ typedef struct {
     system_diag_stage_t stage;
     int wifi_retries;
     int auth_failures;
+    bool finger_detected;
+    float signal_confidence;
+    float motion_level;
     char last_error[96];
 } system_diag_snapshot_t;
 
 void system_diag_init(void);
 void system_diag_set_stage(system_diag_stage_t stage);
+void system_diag_note_signal_quality(float confidence, bool finger_detected, float motion_level);
 esp_err_t system_diag_get_snapshot(system_diag_snapshot_t *snapshot);
 
 #ifdef __cplusplus

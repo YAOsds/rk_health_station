@@ -212,9 +212,13 @@ void VideoMonitorPage::onClassificationUpdated(const FallClassificationResult &r
     FallClassificationBatch batch;
     batch.cameraId = result.cameraId;
     batch.timestampMs = result.timestampMs;
-    batch.results.push_back({result.state, result.confidence});
+    FallClassificationEntry entry;
+    entry.state = result.state;
+    entry.confidence = result.confidence;
+    batch.results.push_back(entry);
     hasFreshClassification_ = true;
     previewWidget_->setClassificationRows(overlayRowsForBatch(batch));
+    previewWidget_->setOverlayEntries({});
     refreshNoPersonTimer();
 }
 
@@ -228,6 +232,19 @@ void VideoMonitorPage::onClassificationBatchUpdated(const FallClassificationBatc
 
     hasFreshClassification_ = !batch.results.isEmpty();
     previewWidget_->setClassificationRows(overlayRowsForBatch(batch));
+
+    QVector<VideoPreviewWidget::OverlayEntry> overlayEntries;
+    overlayEntries.reserve(batch.results.size());
+    for (const FallClassificationEntry &entry : batch.results) {
+        VideoPreviewWidget::OverlayEntry overlay;
+        overlay.iconId = entry.iconId;
+        overlay.state = entry.state;
+        overlay.confidence = entry.confidence;
+        overlay.anchor = QPointF(entry.anchorX, entry.anchorY);
+        overlay.bbox = QRectF(entry.bboxX, entry.bboxY, entry.bboxW, entry.bboxH);
+        overlayEntries.push_back(overlay);
+    }
+    previewWidget_->setOverlayEntries(overlayEntries);
     refreshNoPersonTimer();
 }
 
@@ -299,8 +316,12 @@ QVector<VideoPreviewWidget::ClassificationOverlayRow> VideoMonitorPage::overlayR
     rows.reserve(maxRows);
     for (int index = 0; index < maxRows; ++index) {
         const FallClassificationEntry &entry = batch.results.at(index);
+        const QString prefix = entry.iconId > 0
+            ? QStringLiteral("[%1] ").arg(entry.iconId)
+            : QString();
         rows.push_back({
-            QStringLiteral("%1 %2")
+            QStringLiteral("%1%2 %3")
+                .arg(prefix)
                 .arg(entry.state)
                 .arg(QString::number(entry.confidence, 'f', 2)),
             overlaySeverityForState(entry.state),

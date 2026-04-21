@@ -2,11 +2,28 @@
 
 #include "widgets/video_preview_consumer.h"
 
+#include <QColor>
 #include <QDebug>
 #include <QLabel>
 #include <QPixmap>
 #include <QResizeEvent>
 #include <QVBoxLayout>
+
+namespace {
+QColor colorForIcon(int iconId) {
+    static const QVector<QColor> palette = {
+        QColor(QStringLiteral("#1d4ed8")),
+        QColor(QStringLiteral("#7c3aed")),
+        QColor(QStringLiteral("#047857")),
+        QColor(QStringLiteral("#b45309")),
+        QColor(QStringLiteral("#be123c")),
+    };
+    if (iconId <= 0) {
+        return QColor(QStringLiteral("#475569"));
+    }
+    return palette.at((iconId - 1) % palette.size());
+}
+}
 
 VideoPreviewWidget::VideoPreviewWidget(QWidget *parent)
     : QWidget(parent)
@@ -47,6 +64,7 @@ void VideoPreviewWidget::setPreviewSource(const QString &url, int width, int hei
         frameLabel_->setPixmap(QPixmap());
         frameLabel_->setText(QStringLiteral("Preview unavailable"));
         overlayLabel_->setText(QStringLiteral("Preview unavailable"));
+        setOverlayEntries({});
         return;
     }
 
@@ -98,8 +116,19 @@ void VideoPreviewWidget::setClassificationRows(const QVector<ClassificationOverl
     updateClassificationGeometry();
 }
 
+void VideoPreviewWidget::setOverlayEntries(const QVector<OverlayEntry> &entries) {
+    overlayEntries_ = entries;
+    ensureOverlayLabels(overlayEntries_.size());
+    updateOverlayGeometry();
+}
+
+QVector<VideoPreviewWidget::OverlayEntry> VideoPreviewWidget::overlayEntries() const {
+    return overlayEntries_;
+}
+
 void VideoPreviewWidget::clearClassificationOverlay() {
     setClassificationRows({});
+    setOverlayEntries({});
 }
 
 void VideoPreviewWidget::setSourceBadge(const QString &title, const QString &subtitle) {
@@ -147,16 +176,19 @@ void VideoPreviewWidget::resizeEvent(QResizeEvent *event) {
     renderFrame();
     updateClassificationGeometry();
     updateSourceBadgeGeometry();
+    updateOverlayGeometry();
 }
 
 void VideoPreviewWidget::renderFrame() {
     if (currentFrame_.isNull() || frameLabel_->size().isEmpty()) {
+        updateOverlayGeometry();
         return;
     }
 
     frameLabel_->setPixmap(QPixmap::fromImage(
         currentFrame_.scaled(frameLabel_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
     frameLabel_->setText(QString());
+    updateOverlayGeometry();
 }
 
 void VideoPreviewWidget::updateClassificationGeometry() {
@@ -183,6 +215,57 @@ void VideoPreviewWidget::updateSourceBadgeGeometry() {
         qMax(margin, frameLabel_->width() - sourceBadgeLabel_->width() - margin),
         margin);
     sourceBadgeLabel_->raise();
+}
+
+void VideoPreviewWidget::updateOverlayGeometry() {
+    ensureOverlayLabels(overlayEntries_.size());
+
+    for (int index = 0; index < overlayEntries_.size(); ++index) {
+        const OverlayEntry &entry = overlayEntries_.at(index);
+        QLabel *label = overlayLabels_.at(index);
+        const QPointF anchor = entry.anchor.isNull()
+            ? QPointF(entry.bbox.center().x(), entry.bbox.top())
+            : entry.anchor;
+        const QPointF scaled = scalePointFromSource(anchor);
+        const int badgeWidth = 34;
+        const int badgeHeight = 24;
+        const int x = qRound(scaled.x()) - (badgeWidth / 2);
+        const int y = qRound(scaled.y()) - 36;
+
+        label->setText(entry.iconId > 0 ? QString::number(entry.iconId) : QStringLiteral("?"));
+        label->setAlignment(Qt::AlignCenter);
+        label->setFixedSize(badgeWidth, badgeHeight);
+        const QColor fill = colorForIcon(entry.iconId);
+        const QString border = entry.state == QStringLiteral("fall")
+            ? QStringLiteral("2px solid #d62828")
+            : QStringLiteral("none");
+        label->setStyleSheet(QStringLiteral(
+            "color: #ffffff; background-color: %1; border: %2; border-radius: 12px; font: 700 15px;")
+                .arg(fill.name())
+                .arg(border));
+        label->move(x, qMax(0, y));
+        label->show();
+        label->raise();
+    }
+
+    for (int index = overlayEntries_.size(); index < overlayLabels_.size(); ++index) {
+        overlayLabels_.at(index)->clear();
+        overlayLabels_.at(index)->hide();
+    }
+}
+
+QPointF VideoPreviewWidget::scalePointFromSource(const QPointF &point) const {
+    if (currentFrame_.isNull() || frameLabel_ == nullptr || frameLabel_->size().isEmpty()) {
+        return point;
+    }
+
+    const QSize scaled = currentFrame_.size().scaled(frameLabel_->size(), Qt::KeepAspectRatio);
+    const qreal offsetX = (frameLabel_->width() - scaled.width()) / 2.0;
+    const qreal offsetY = (frameLabel_->height() - scaled.height()) / 2.0;
+    const qreal scaleX = scaled.width() / static_cast<qreal>(currentFrame_.width());
+    const qreal scaleY = scaled.height() / static_cast<qreal>(currentFrame_.height());
+
+    return QPointF(offsetX + (point.x() * scaleX), offsetY + (point.y() * scaleY));
 }
 
 void VideoPreviewWidget::applyClassificationStyle(
@@ -214,5 +297,14 @@ void VideoPreviewWidget::ensureClassificationLabels(int count) {
         label->setAttribute(Qt::WA_TransparentForMouseEvents);
         label->hide();
         classificationLabels_.push_back(label);
+    }
+}
+
+void VideoPreviewWidget::ensureOverlayLabels(int count) {
+    while (overlayLabels_.size() < count) {
+        auto *label = new QLabel(frameLabel_);
+        label->setAttribute(Qt::WA_TransparentForMouseEvents);
+        label->hide();
+        overlayLabels_.push_back(label);
     }
 }

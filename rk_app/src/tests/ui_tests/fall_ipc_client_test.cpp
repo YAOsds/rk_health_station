@@ -11,6 +11,7 @@ class FallIpcClientTest : public QObject {
 private slots:
     void receivesRealtimeClassification();
     void receivesRealtimeClassificationBatch();
+    void emitsBatchWithOverlayMetadata();
     void usesEnvironmentSocketNameByDefault();
 };
 
@@ -77,6 +78,40 @@ void FallIpcClientTest::receivesRealtimeClassificationBatch() {
     QCOMPARE(batch.results.at(0).state, QStringLiteral("stand"));
     QCOMPARE(batch.results.at(1).state, QStringLiteral("fall"));
     QCOMPARE(batch.results.at(1).confidence, 0.96);
+}
+
+void FallIpcClientTest::emitsBatchWithOverlayMetadata() {
+    const QString socketName = QStringLiteral("/tmp/rk_fall_ui_overlay_client_test.sock");
+    QLocalServer::removeServer(socketName);
+
+    QLocalServer server;
+    QVERIFY(server.listen(socketName));
+
+    FallIpcClient client(socketName);
+    QSignalSpy batchSpy(&client, SIGNAL(classificationBatchUpdated(FallClassificationBatch)));
+
+    QVERIFY(client.connectToBackend());
+    QVERIFY(server.waitForNewConnection(2000));
+    QLocalSocket *socket = server.nextPendingConnection();
+    QVERIFY(socket != nullptr);
+
+    QTRY_VERIFY_WITH_TIMEOUT(socket->bytesAvailable() > 0 || socket->waitForReadyRead(50), 2000);
+    QVERIFY(socket->readAll().contains("subscribe_classification"));
+
+    const QByteArray line = QByteArrayLiteral(
+        "{\"type\":\"classification_batch\",\"camera_id\":\"front_cam\",\"ts\":1777000000000,"
+        "\"person_count\":1,\"results\":[{\"track_id\":3,\"icon_id\":1,\"state\":\"stand\","
+        "\"confidence\":0.98,\"anchor_x\":312,\"anchor_y\":118,\"bbox_x\":250,\"bbox_y\":90,\"bbox_w\":120,\"bbox_h\":260}]}\n");
+    socket->write(line);
+    socket->flush();
+
+    QTRY_COMPARE_WITH_TIMEOUT(batchSpy.count(), 1, 2000);
+    const FallClassificationBatch batch =
+        batchSpy.takeFirst().at(0).value<FallClassificationBatch>();
+    QCOMPARE(batch.results.size(), 1);
+    QCOMPARE(batch.results.first().iconId, 1);
+    QCOMPARE(batch.results.first().anchorX, 312.0);
+    QCOMPARE(batch.results.first().bboxH, 260.0);
 }
 
 void FallIpcClientTest::usesEnvironmentSocketNameByDefault() {

@@ -64,8 +64,16 @@ struct FallClassificationResult {
 };
 
 struct FallClassificationEntry {
+    int trackId = -1;
+    int iconId = -1;
     QString state;
     double confidence = 0.0;
+    double anchorX = 0.0;
+    double anchorY = 0.0;
+    double bboxX = 0.0;
+    double bboxY = 0.0;
+    double bboxW = 0.0;
+    double bboxH = 0.0;
 };
 
 struct FallClassificationBatch {

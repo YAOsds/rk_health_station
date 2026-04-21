@@ -1,5 +1,6 @@
 #include "protocol/fall_ipc.h"
 
+#include <QJsonArray>
 #include <QtTest/QTest>
 
 class FallProtocolTest : public QObject {
@@ -9,6 +10,8 @@ private slots:
     void roundTripsRuntimeStatusJson();
     void roundTripsClassificationJson();
     void roundTripsClassificationBatch();
+    void roundTripsClassificationBatchOverlayMetadata();
+    void decodesLegacyClassificationBatchWithoutOverlayMetadata();
 };
 
 void FallProtocolTest::roundTripsRuntimeStatusJson() {
@@ -73,6 +76,67 @@ void FallProtocolTest::roundTripsClassificationBatch() {
     QCOMPARE(decoded.results.at(0).state, QStringLiteral("stand"));
     QCOMPARE(decoded.results.at(1).state, QStringLiteral("fall"));
     QCOMPARE(decoded.results.at(1).confidence, 0.96);
+}
+
+void FallProtocolTest::roundTripsClassificationBatchOverlayMetadata() {
+    FallClassificationBatch batch;
+    batch.cameraId = QStringLiteral("front_cam");
+    batch.timestampMs = 1777000000000;
+
+    FallClassificationEntry first;
+    first.trackId = 3;
+    first.iconId = 1;
+    first.state = QStringLiteral("stand");
+    first.confidence = 0.98;
+    first.anchorX = 312.0;
+    first.anchorY = 118.0;
+    first.bboxX = 250.0;
+    first.bboxY = 90.0;
+    first.bboxW = 120.0;
+    first.bboxH = 260.0;
+    batch.results.push_back(first);
+
+    const QJsonObject json = fallClassificationBatchToJson(batch);
+    const QJsonArray results = json.value(QStringLiteral("results")).toArray();
+    QCOMPARE(results.size(), 1);
+
+    const QJsonObject firstJson = results.first().toObject();
+    QCOMPARE(firstJson.value(QStringLiteral("track_id")).toInt(), 3);
+    QCOMPARE(firstJson.value(QStringLiteral("icon_id")).toInt(), 1);
+    QCOMPARE(firstJson.value(QStringLiteral("anchor_x")).toDouble(), 312.0);
+    QCOMPARE(firstJson.value(QStringLiteral("anchor_y")).toDouble(), 118.0);
+    QCOMPARE(firstJson.value(QStringLiteral("bbox_x")).toDouble(), 250.0);
+    QCOMPARE(firstJson.value(QStringLiteral("bbox_y")).toDouble(), 90.0);
+    QCOMPARE(firstJson.value(QStringLiteral("bbox_w")).toDouble(), 120.0);
+    QCOMPARE(firstJson.value(QStringLiteral("bbox_h")).toDouble(), 260.0);
+
+    FallClassificationBatch decoded;
+    QVERIFY(fallClassificationBatchFromJson(json, &decoded));
+    QCOMPARE(decoded.results.size(), 1);
+    QCOMPARE(decoded.results.first().trackId, 3);
+    QCOMPARE(decoded.results.first().iconId, 1);
+    QCOMPARE(decoded.results.first().anchorX, 312.0);
+    QCOMPARE(decoded.results.first().anchorY, 118.0);
+    QCOMPARE(decoded.results.first().bboxW, 120.0);
+    QCOMPARE(decoded.results.first().bboxH, 260.0);
+}
+
+void FallProtocolTest::decodesLegacyClassificationBatchWithoutOverlayMetadata() {
+    const QJsonObject json{
+        {QStringLiteral("type"), QStringLiteral("classification_batch")},
+        {QStringLiteral("camera_id"), QStringLiteral("front_cam")},
+        {QStringLiteral("ts"), 1777000000000LL},
+        {QStringLiteral("person_count"), 1},
+        {QStringLiteral("results"), QJsonArray{QJsonObject{{QStringLiteral("state"), QStringLiteral("fall")}, {QStringLiteral("confidence"), 0.95}}}}
+    };
+
+    FallClassificationBatch decoded;
+    QVERIFY(fallClassificationBatchFromJson(json, &decoded));
+    QCOMPARE(decoded.results.size(), 1);
+    QCOMPARE(decoded.results.first().trackId, -1);
+    QCOMPARE(decoded.results.first().iconId, -1);
+    QCOMPARE(decoded.results.first().state, QStringLiteral("fall"));
+    QCOMPARE(decoded.results.first().confidence, 0.95);
 }
 
 QTEST_MAIN(FallProtocolTest)

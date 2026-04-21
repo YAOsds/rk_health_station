@@ -7,6 +7,7 @@
 
 #include <QDateTime>
 #include <QDebug>
+#include <QPointF>
 #include <QStringList>
 
 #include <memory>
@@ -21,6 +22,26 @@ int validKeypointCount(const PosePerson &person) {
     }
     return count;
 }
+
+QPointF overlayAnchorForPose(const PosePerson &person) {
+    const QVector<int> preferred = {0, 1, 2, 3, 4};
+    QVector<QPointF> points;
+    for (int index : preferred) {
+        if (index < person.keypoints.size() && person.keypoints[index].score > 0.2f) {
+            points.push_back(QPointF(person.keypoints[index].x, person.keypoints[index].y));
+        }
+    }
+
+    if (!points.isEmpty()) {
+        QPointF sum;
+        for (const QPointF &point : points) {
+            sum += point;
+        }
+        return sum / points.size();
+    }
+
+    return QPointF(person.box.center().x(), person.box.top());
+}
 }
 
 FallDaemonApp::FallDaemonApp(QObject *parent)
@@ -34,6 +55,7 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
     , actionClassifier_(createActionClassifier(config_))
     , detectorService_(actionClassifier_.get())
     , tracker_(config_)
+    , trackIconRegistry_(config_.maxTracks)
     , trackTraceLogger_(config_.trackTracePath)
     , ingestClient_(new AnalysisStreamClient(config_.analysisSocketPath, this))
     , gateway_(new FallGateway(FallRuntimeStatus(), this)) {
@@ -58,6 +80,11 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
 
             runtimeStatus_.lastError.clear();
             QVector<TrackedPerson> &tracks = tracker_.update(people, runtimeStatus_.lastInferTs);
+            QVector<int> activeTrackIds;
+            for (const TrackedPerson &track : tracks) {
+                activeTrackIds.push_back(track.trackId);
+            }
+            trackIconRegistry_.reconcileActiveTracks(activeTrackIds);
             if (tracks.isEmpty()) {
                 runtimeStatus_.latestState = QStringLiteral("monitoring");
                 runtimeStatus_.latestConfidence = 0.0;
@@ -104,9 +131,19 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                 track.lastClassificationConfidence = result.classificationConfidence;
                 track.hasFreshClassification = true;
 
+                const QPointF anchor = overlayAnchorForPose(track.latestPose);
+
                 FallClassificationEntry entry;
+                entry.trackId = track.trackId;
+                entry.iconId = trackIconRegistry_.iconIdForTrack(track.trackId);
                 entry.state = result.classificationState;
                 entry.confidence = result.classificationConfidence;
+                entry.anchorX = anchor.x();
+                entry.anchorY = anchor.y();
+                entry.bboxX = track.latestPose.box.x();
+                entry.bboxY = track.latestPose.box.y();
+                entry.bboxW = track.latestPose.box.width();
+                entry.bboxH = track.latestPose.box.height();
                 batch.results.push_back(entry);
 
                 if (entry.confidence >= highestConfidence) {
@@ -146,7 +183,9 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                            .arg(classification.state)
                            .arg(QString::number(classification.confidence, 'f', 3))
                            .arg(classification.timestampMs);
-            } else if (!batch.results.isEmpty()) {
+            }
+
+            if (!batch.results.isEmpty()) {
                 gateway_->publishClassificationBatch(batch);
                 QStringList states;
                 for (const FallClassificationEntry &entry : batch.results) {

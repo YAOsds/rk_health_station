@@ -110,12 +110,30 @@ void VideoMonitorPageTest::showsMultiPersonClassificationOverlay() {
     FallClassificationBatch batch;
     batch.cameraId = QStringLiteral("front_cam");
     batch.timestampMs = 1776359310534;
-    batch.results.push_back({QStringLiteral("stand"), 0.91});
-    batch.results.push_back({QStringLiteral("fall"), 0.96});
+
+    FallClassificationEntry first;
+    first.trackId = 3;
+    first.iconId = 1;
+    first.state = QStringLiteral("stand");
+    first.confidence = 0.91;
+    batch.results.push_back(first);
+
+    FallClassificationEntry second;
+    second.trackId = 5;
+    second.iconId = 2;
+    second.state = QStringLiteral("fall");
+    second.confidence = 0.96;
+    batch.results.push_back(second);
+
     emit fallClient.classificationBatchUpdated(batch);
 
     QCOMPARE(page.previewOverlayRows(),
-        QStringList({QStringLiteral("stand 0.91"), QStringLiteral("fall 0.96")}));
+        QStringList({QStringLiteral("[1] stand 0.91"), QStringLiteral("[2] fall 0.96")}));
+
+    VideoPreviewWidget *previewWidget = page.findChild<VideoPreviewWidget *>();
+    QVERIFY(previewWidget != nullptr);
+    QCOMPARE(previewWidget->overlayEntries().size(), 2);
+    QCOMPARE(previewWidget->overlayEntries().first().iconId, 1);
 }
 
 void VideoMonitorPageTest::doesNotShowNoPersonWhileClassificationIsStillWarmingUp() {

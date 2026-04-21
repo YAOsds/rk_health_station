@@ -59,6 +59,7 @@ __pycache__/
 .env.*
 .venv/
 venv/
+esp_fw/sdkconfig
 
 # IDE settings
 .idea/

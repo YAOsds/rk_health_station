@@ -472,6 +472,27 @@ target_link_libraries(health_ui_smoke_test PRIVATE
 
 add_test(NAME health_ui_smoke_test COMMAND health_ui_smoke_test)
 
+add_executable(dashboard_page_test
+    ui_tests/dashboard_page_test.cpp
+    ../health_ui/pages/dashboard_page.cpp
+)
+
+set_target_properties(dashboard_page_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(dashboard_page_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_ui
+)
+
+target_link_libraries(dashboard_page_test PRIVATE
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+    ${RK_QT_WIDGETS_TARGET}
+)
+
+add_test(NAME dashboard_page_test COMMAND dashboard_page_test)
+
 
 add_executable(video_service_test
     video_daemon_tests/video_service_test.cpp

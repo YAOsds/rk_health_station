@@ -89,8 +89,15 @@ void FallGatewayTest::broadcastsClassificationBatchToSubscribers() {
     FallClassificationBatch batch;
     batch.cameraId = QStringLiteral("front_cam");
     batch.timestampMs = 1776367000000;
-    batch.results.push_back({QStringLiteral("stand"), 0.91});
-    batch.results.push_back({QStringLiteral("fall"), 0.96});
+    FallClassificationEntry first;
+    first.state = QStringLiteral("stand");
+    first.confidence = 0.91;
+    batch.results.push_back(first);
+
+    FallClassificationEntry second;
+    second.state = QStringLiteral("fall");
+    second.confidence = 0.96;
+    batch.results.push_back(second);
 
     gateway.publishClassificationBatch(batch);
 

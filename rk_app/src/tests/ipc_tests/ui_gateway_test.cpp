@@ -1,3 +1,4 @@
+#include "host/host_wifi_status_provider.h"
 #include "device/device_manager.h"
 #include "ipc_server/ui_gateway.h"
 #include "storage/database.h"
@@ -13,9 +14,21 @@ class UiGatewayTest : public QObject {
 
 private slots:
     void requestDeviceList();
+    void requestDashboardSnapshotIncludesHostWifi();
     void approvePendingDeviceViaGateway();
     void requestAlertsSnapshot();
     void requestHistorySeries();
+};
+
+class StubHostWifiStatusProvider final : public HostWifiStatusProvider {
+public:
+    using HostWifiStatusProvider::HostWifiStatusProvider;
+
+    HostWifiStatus value;
+
+    HostWifiStatus currentStatus() const override {
+        return value;
+    }
 };
 
 void UiGatewayTest::requestDeviceList() {
@@ -53,6 +66,47 @@ void UiGatewayTest::requestDeviceList() {
     QCOMPARE(devices.size(), 1);
     QCOMPARE(devices.at(0).toObject().value(QStringLiteral("device_id")).toString(),
         QStringLiteral("watch_ipc_001"));
+    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
+}
+
+void UiGatewayTest::requestDashboardSnapshotIncludesHostWifi() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    qputenv("RK_HEALTH_STATION_SOCKET_NAME",
+        tempDir.filePath(QStringLiteral("rk_health_station.sock")).toUtf8());
+
+    DeviceManager deviceManager;
+    StubHostWifiStatusProvider provider;
+    provider.value.present = true;
+    provider.value.connected = false;
+    provider.value.interfaceName = QStringLiteral("wlan0");
+    provider.value.ssid = QStringLiteral("--");
+    provider.value.ipv4 = QStringLiteral("--");
+
+    UiGateway gateway(&deviceManager, nullptr, &provider);
+    QVERIFY(gateway.start());
+
+    QLocalSocket socket;
+    socket.connectToServer(qEnvironmentVariable("RK_HEALTH_STATION_SOCKET_NAME"));
+    QVERIFY(socket.waitForConnected(3000));
+
+    IpcMessage req {1, QStringLiteral("request"), QStringLiteral("get_dashboard_snapshot"),
+        QStringLiteral("req-dashboard-1"), true, {}};
+    socket.write(IpcCodec::encode(req));
+    QVERIFY(socket.waitForBytesWritten(3000));
+    QTRY_VERIFY_WITH_TIMEOUT(socket.bytesAvailable() > 0, 3000);
+
+    IpcMessage response;
+    QVERIFY(IpcCodec::decode(socket.readAll(), &response));
+    QCOMPARE(response.action, QStringLiteral("get_dashboard_snapshot"));
+    QVERIFY(response.ok);
+    QVERIFY(response.payload.contains(QStringLiteral("host_wifi")));
+    const QJsonObject hostWifi = response.payload.value(QStringLiteral("host_wifi")).toObject();
+    QCOMPARE(hostWifi.value(QStringLiteral("present")).toBool(), true);
+    QCOMPARE(hostWifi.value(QStringLiteral("connected")).toBool(), false);
+    QCOMPARE(hostWifi.value(QStringLiteral("interface_name")).toString(), QStringLiteral("wlan0"));
+    QCOMPARE(hostWifi.value(QStringLiteral("ssid")).toString(), QStringLiteral("--"));
+    QCOMPARE(hostWifi.value(QStringLiteral("ipv4")).toString(), QStringLiteral("--"));
     qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 

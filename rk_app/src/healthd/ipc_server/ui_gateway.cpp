@@ -1,6 +1,7 @@
 #include "ipc_server/ui_gateway.h"
 
 #include "device/device_manager.h"
+#include "host/host_wifi_status_provider.h"
 #include "storage/database.h"
 
 #include <QJsonArray>
@@ -53,10 +54,12 @@ QString UiGateway::socketName() {
     return overrideName.isEmpty() ? QString::fromUtf8(kSocketName) : overrideName;
 }
 
-UiGateway::UiGateway(DeviceManager *deviceManager, Database *database, QObject *parent)
+UiGateway::UiGateway(DeviceManager *deviceManager, Database *database,
+    HostWifiStatusProvider *hostWifiStatusProvider, QObject *parent)
     : QObject(parent)
     , deviceManager_(deviceManager)
     , database_(database)
+    , hostWifiStatusProvider_(hostWifiStatusProvider)
     , server_(new QLocalServer(this)) {
     connect(server_, &QLocalServer::newConnection, this, &UiGateway::onNewConnection);
 }
@@ -246,6 +249,10 @@ IpcMessage UiGateway::buildDashboardResponse(const QString &reqId) const {
     response.payload.insert(QStringLiteral("device_count"), devices.size());
     response.payload.insert(QStringLiteral("current_device_id"), currentDeviceId);
     response.payload.insert(QStringLiteral("devices"), devices);
+    const HostWifiStatus hostWifi = hostWifiStatusProvider_
+        ? hostWifiStatusProvider_->currentStatus()
+        : HostWifiStatus();
+    response.payload.insert(QStringLiteral("host_wifi"), hostWifiToJson(hostWifi));
     return response;
 }
 
@@ -498,6 +505,16 @@ IpcMessage UiGateway::buildErrorResponse(
     response.ok = false;
     response.payload.insert(QStringLiteral("error"), errorCode);
     return response;
+}
+
+QJsonObject UiGateway::hostWifiToJson(const HostWifiStatus &status) {
+    QJsonObject object;
+    object.insert(QStringLiteral("present"), status.present);
+    object.insert(QStringLiteral("connected"), status.connected);
+    object.insert(QStringLiteral("interface_name"), status.interfaceName);
+    object.insert(QStringLiteral("ssid"), status.ssid);
+    object.insert(QStringLiteral("ipv4"), status.ipv4);
+    return object;
 }
 
 void UiGateway::appendDeviceJson(QJsonArray *devices, const QString &deviceId,

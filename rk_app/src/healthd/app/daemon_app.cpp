@@ -35,7 +35,8 @@ QString helloDecisionToString(AuthManager::HelloDecision decision) {
 DaemonApp::DaemonApp(QObject *parent)
     : QObject(parent)
     , deviceManager_(&database_)
-    , uiGateway_(&deviceManager_, &database_, this)
+    , hostWifiStatusProvider_(this)
+    , uiGateway_(&deviceManager_, &database_, &hostWifiStatusProvider_, this)
     , telemetryService_(&deviceManager_, &database_)
     , databasePath_(qEnvironmentVariable(kDatabaseEnvVar))
     , markerPath_(qEnvironmentVariable(kMarkerEnvVar)) {

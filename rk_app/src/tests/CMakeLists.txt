@@ -423,6 +423,7 @@ add_test(NAME device_admin_test COMMAND device_admin_test)
 add_executable(ui_gateway_test
     ipc_tests/ui_gateway_test.cpp
     ../healthd/alerts/alert_engine.cpp
+    ../healthd/host/host_wifi_status_provider.cpp
     ../healthd/ipc_server/ui_gateway.cpp
     ../healthd/device/device_manager.cpp
 )

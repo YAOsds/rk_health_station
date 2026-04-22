@@ -1,6 +1,7 @@
 #pragma once
 
 #include "alerts/alert_engine.h"
+#include "host/host_wifi_status.h"
 #include "protocol/ipc_message.h"
 
 #include <QByteArray>
@@ -10,6 +11,7 @@
 
 class DeviceManager;
 class Database;
+class HostWifiStatusProvider;
 class QLocalServer;
 class QLocalSocket;
 
@@ -25,8 +27,8 @@ class UiGateway : public QObject {
 public:
     static QString socketName();
 
-    explicit UiGateway(
-        DeviceManager *deviceManager, Database *database = nullptr, QObject *parent = nullptr);
+    explicit UiGateway(DeviceManager *deviceManager, Database *database = nullptr,
+        HostWifiStatusProvider *hostWifiStatusProvider = nullptr, QObject *parent = nullptr);
     ~UiGateway() override;
 
     bool start();
@@ -51,6 +53,7 @@ private:
     IpcMessage handleResetDeviceSecret(const IpcMessage &message) const;
     IpcMessage buildErrorResponse(const QString &action, const QString &reqId,
         const QString &errorCode) const;
+    static QJsonObject hostWifiToJson(const HostWifiStatus &status);
     static void appendDeviceJson(QJsonArray *devices, const QString &deviceId,
         const QString &deviceName, const QString &status, bool online, qint64 lastSeenAt,
         const QString &remoteIp);
@@ -58,6 +61,7 @@ private:
 
     DeviceManager *deviceManager_ = nullptr;
     Database *database_ = nullptr;
+    HostWifiStatusProvider *hostWifiStatusProvider_ = nullptr;
     QLocalServer *server_ = nullptr;
     QHash<QLocalSocket *, QByteArray> readBuffers_;
     mutable AlertEngine alertEngine_;

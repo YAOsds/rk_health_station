@@ -2,6 +2,7 @@
 
 #include "device/auth_manager.h"
 #include "device/device_manager.h"
+#include "host/host_wifi_status_provider.h"
 #include "ipc_server/ui_gateway.h"
 #include "network/tcp_acceptor.h"
 #include "storage/database.h"
@@ -41,6 +42,7 @@ private:
     Database database_;
     AuthManager authManager_;
     DeviceManager deviceManager_;
+    NmcliHostWifiStatusProvider hostWifiStatusProvider_;
     UiGateway uiGateway_;
     TelemetryService telemetryService_;
     bool started_ = false;

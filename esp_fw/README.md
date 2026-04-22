@@ -90,7 +90,7 @@ Use the actual serial device shown above in later commands. Many boards appear a
 
 ```bash
 idf.py build
-idf.py -p /dev/ttyACM0 flash monitor
+idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
 4. Watch the serial log for these key checkpoints:

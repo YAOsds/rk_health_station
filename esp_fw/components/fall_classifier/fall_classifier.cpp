@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <new>
 
 #include "dl_model_base.hpp"
 #include "dl_tensor_base.hpp"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 
 extern "C" {
@@ -126,9 +128,31 @@ extern "C" esp_err_t fall_classifier_init(void)
     g_runtime.useHeuristic = true;
     const size_t modelSize = static_cast<size_t>(_binary_imu_fall_waist_3class_espdl_end
         - _binary_imu_fall_waist_3class_espdl_start);
+    const uintptr_t modelAddr = reinterpret_cast<uintptr_t>(_binary_imu_fall_waist_3class_espdl_start);
+    const bool aligned16 = (modelAddr & 0x0fU) == 0U;
+    const float largestInternalKb = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024.0f;
+    const float largestPsramKb = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024.0f;
+
+    ESP_LOGI(TAG, "model_size=%u", static_cast<unsigned>(modelSize));
+    ESP_LOGI(TAG, "model_addr=0x%08lx aligned16=%d", static_cast<unsigned long>(modelAddr), aligned16 ? 1 : 0);
+    ESP_LOGI(TAG,
+        "largest_internal_kb=%.2f largest_psram_kb=%.2f",
+        static_cast<double>(largestInternalKb),
+        static_cast<double>(largestPsramKb));
+
     if (modelSize == 0U) {
-        ESP_LOGW(TAG, "embedded espdl artifact is empty, using heuristic fallback");
-        return ESP_OK;
+        ESP_LOGE(TAG, "embedded espdl artifact is empty");
+        return ESP_FAIL;
+    }
+
+#if !CONFIG_SPIRAM
+    ESP_LOGE(TAG, "PSRAM support is disabled in sdkconfig");
+    return ESP_FAIL;
+#endif
+
+    if (!aligned16) {
+        ESP_LOGE(TAG, "embedded espdl artifact is not 16-byte aligned");
+        return ESP_FAIL;
     }
 
     g_runtime.model = new (std::nothrow) dl::Model(
@@ -138,11 +162,15 @@ extern "C" esp_err_t fall_classifier_init(void)
         dl::MEMORY_MANAGER_GREEDY,
         nullptr,
         true);
-    if (!g_runtime.model || g_runtime.model->get_inputs().empty() || g_runtime.model->get_outputs().empty()) {
-        ESP_LOGW(TAG, "failed to load esp-dl model, using heuristic fallback");
+    if (!g_runtime.model) {
+        ESP_LOGE(TAG, "dl::Model allocation failed");
+        return ESP_FAIL;
+    }
+    if (g_runtime.model->get_inputs().empty() || g_runtime.model->get_outputs().empty()) {
+        ESP_LOGE(TAG, "esp-dl model loaded without valid inputs/outputs");
         delete g_runtime.model;
         g_runtime.model = nullptr;
-        return ESP_OK;
+        return ESP_FAIL;
     }
 
     g_runtime.useHeuristic = false;

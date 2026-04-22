@@ -8,7 +8,8 @@ if [ ! -x "$PYTHON_BIN" ] || ! "$PYTHON_BIN" -m pytest --version >/dev/null 2>&1
     PYTHON_BIN="python3"
 fi
 
-"$PYTHON_BIN" -m pytest ml/imu_fall_model/tests -q
+MODEL_WORKSPACE="/home/elf/workspace/imu_fall_detect/imu_fall_model"
+"$PYTHON_BIN" -m pytest "$MODEL_WORKSPACE/tests" -q
 
 HOST_TEST_DIR="/tmp/rk_health_station_esp_fw_host_checks"
 mkdir -p "$HOST_TEST_DIR"

@@ -37,7 +37,7 @@ The ESP firmware is split into small components and a thin `main/` orchestration
 - `signal_filter`: window analysis, finger detection, signal confidence, motion estimate
 - `heart_rate_algo`: converts analyzed signal quality into vital-sign outputs
 - `imu_window_buffer`: keeps a rolling `256 x 6` IMU tensor with stride-based emission
-- `fall_classifier`: wraps the on-device IMU fall classifier interface
+- `fall_classifier`: wraps the on-device IMU fall classifier interface, logs model-size/alignment/heap diagnostics, and loads the aligned `.espdl` artifact from flash rodata
 - `imu_event_state`: smooths consecutive fall windows before telemetry emission
 
 ### UI feedback
@@ -81,6 +81,15 @@ The ESP firmware is split into small components and a thin `main/` orchestration
 ## Debugging signals
 
 - serial logs annotate boot, Wi-Fi state, sensor init, telemetry send, and auth outcomes
+- serial logs print fall-classifier memory diagnostics before `esp-dl` model load
 - serial logs also print `imu_fall class=<n> probs=[p0 p1 p2]` after each emitted IMU window
 - `system_diag` keeps retry counters plus latest signal confidence / motion level
 - `led_status` gives physical visibility into the current lifecycle state
+
+## Model artifact ownership
+
+- Offline training and export live in `/home/elf/workspace/imu_fall_detect/imu_fall_model`
+- Firmware consumes the generated `.espdl` artifact from `esp_fw/models/`
+- `tools/run_imu_model_pipeline.sh` now checks or syncs prebuilt artifacts only; it no longer trains in the firmware tree
+- `components/fall_classifier/CMakeLists.txt` uses aligned binary embedding so the flash-rodata model address stays 16-byte aligned for `esp-dl`
+- PSRAM is enabled in `sdkconfig.defaults` so `esp-dl` can allocate its runtime buffers without the earlier crash path

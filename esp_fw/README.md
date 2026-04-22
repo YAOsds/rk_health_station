@@ -32,7 +32,14 @@ cd esp_fw
 idf.py build
 ```
 
-This refreshes `models/imu_fall_waist_3class.espdl` before rebuilding the firmware.
+This syncs the prebuilt model artifact from `/home/elf/workspace/imu_fall_detect/artifacts`
+into `models/imu_fall_waist_3class.espdl` before rebuilding the firmware.
+
+Real IMU fall-model inference requires:
+1. Generate artifacts in `/home/elf/workspace/imu_fall_detect/imu_fall_model`
+2. Sync artifacts into `esp_fw/models/` with `bash tools/run_imu_model_pipeline.sh`
+3. Build firmware with PSRAM enabled
+4. Flash and verify `FALL_CLS: esp-dl model loaded successfully`
 
 ## Flash
 
@@ -89,6 +96,9 @@ idf.py -p /dev/ttyACM0 flash monitor
 4. Watch the serial log for these key checkpoints:
 
 - model loaded:
+  - `FALL_CLS: model_size=...`
+  - `FALL_CLS: model_addr=0x........ aligned16=1`
+  - `FALL_CLS: largest_internal_kb=... largest_psram_kb=...`
   - `FALL_CLS: esp-dl model loaded successfully`
 - IMU inference is active:
   - `imu_fall class=<0|1|2> probs=[...]`
@@ -117,7 +127,7 @@ idf.py -p /dev/ttyACM0 flash monitor
 Common failure hints:
 
 - no `esp-dl model loaded successfully`:
-  - the embedded `.espdl` artifact is missing, empty, or failed to load
+  - the embedded `.espdl` artifact is missing, empty, misaligned, or PSRAM-backed load failed
 - no `imu_fall class=...` lines:
   - the MPU6050 path is not producing data yet, or the rolling 256-sample window is not full
 - repeated Wi-Fi / auth retry logs:
@@ -152,7 +162,8 @@ While the device is waiting in provisioning mode, serial logs emit a heartbeat e
 bash tools/run_host_checks.sh
 ```
 
-This runs the Python-side IMU model tests, provisioning host-side checks, and then a full `idf.py build`.
+This runs the external IMU model tests from `/home/elf/workspace/imu_fall_detect/imu_fall_model/tests`,
+the provisioning host-side checks, and then a full `idf.py build`.
 
 ## Helpful scripts
 

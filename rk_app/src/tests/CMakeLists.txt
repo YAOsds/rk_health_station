@@ -263,6 +263,27 @@ target_link_libraries(shared_models_contract_test PRIVATE
 
 add_test(NAME shared_models_contract_test COMMAND shared_models_contract_test)
 
+add_executable(host_wifi_status_provider_test
+    host_tests/host_wifi_status_provider_test.cpp
+    ../healthd/host/host_wifi_status_provider.cpp
+)
+
+set_target_properties(host_wifi_status_provider_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(host_wifi_status_provider_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../healthd
+)
+
+target_link_libraries(host_wifi_status_provider_test PRIVATE
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_NETWORK_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME host_wifi_status_provider_test COMMAND host_wifi_status_provider_test)
+
 add_executable(healthd_tcp_smoke_test
     integration_tests/healthd_tcp_smoke_test.cpp
 )

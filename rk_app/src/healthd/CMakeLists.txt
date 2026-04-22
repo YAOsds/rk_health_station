@@ -20,6 +20,9 @@ add_executable(healthd
     device/auth_manager.h
     device/device_manager.cpp
     device/device_manager.h
+    host/host_wifi_status.h
+    host/host_wifi_status_provider.cpp
+    host/host_wifi_status_provider.h
     ipc_server/ui_gateway.cpp
     ipc_server/ui_gateway.h
     network/tcp_acceptor.cpp

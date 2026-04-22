@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 #include "board_config.h"
-#include "driver/i2c_master.h"
+#include "driver/i2c.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -12,13 +12,10 @@
 #define MPU6050_XFER_TIMEOUT_MS 100
 
 struct mpu6050_dev_s {
-    i2c_master_bus_handle_t bus_handle;
-    i2c_master_dev_handle_t dev_handle;
     i2c_port_num_t i2c_port;
     uint32_t bus_speed_hz;
     mpu6050_accel_range_t accel_range;
     mpu6050_gyro_range_t gyro_range;
-    bool owns_bus;
 };
 
 static const char *TAG = "MPU6050";
@@ -53,43 +50,31 @@ static float gyro_lsb_per_dps(mpu6050_gyro_range_t range)
     }
 }
 
-static esp_err_t ensure_i2c_bus(i2c_port_num_t port, i2c_master_bus_handle_t *bus_handle, bool *owns_bus)
-{
-    const board_config_t *board = board_config_get();
-    i2c_master_bus_config_t bus_config = {
-        .i2c_port = port,
-        .sda_io_num = board->i2c_sda_pin,
-        .scl_io_num = board->i2c_scl_pin,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .intr_priority = 0,
-        .trans_queue_depth = 4,
-        .flags.enable_internal_pullup = 1,
-    };
-    esp_err_t ret;
-
-    ret = i2c_master_get_bus_handle(port, bus_handle);
-    if (ret == ESP_OK) {
-        *owns_bus = false;
-        return ESP_OK;
-    }
-
-    ret = i2c_new_master_bus(&bus_config, bus_handle);
-    if (ret == ESP_OK) {
-        *owns_bus = true;
-    }
-    return ret;
-}
-
 static esp_err_t write_register(mpu6050_handle_t handle, uint8_t reg, uint8_t value)
 {
     uint8_t payload[2] = {reg, value};
-    return i2c_master_transmit(handle->dev_handle, payload, sizeof(payload), MPU6050_XFER_TIMEOUT_MS);
+    return i2c_master_write_to_device(handle->i2c_port,
+        MPU6050_I2C_ADDRESS,
+        payload,
+        sizeof(payload),
+        pdMS_TO_TICKS(MPU6050_XFER_TIMEOUT_MS));
 }
 
 static esp_err_t read_register(mpu6050_handle_t handle, uint8_t reg, uint8_t *value)
 {
-    return i2c_master_transmit_receive(handle->dev_handle, &reg, 1, value, 1, MPU6050_XFER_TIMEOUT_MS);
+    esp_err_t ret = i2c_master_write_to_device(handle->i2c_port,
+        MPU6050_I2C_ADDRESS,
+        &reg,
+        1,
+        pdMS_TO_TICKS(MPU6050_XFER_TIMEOUT_MS));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    return i2c_master_read_from_device(handle->i2c_port,
+        MPU6050_I2C_ADDRESS,
+        value,
+        1,
+        pdMS_TO_TICKS(MPU6050_XFER_TIMEOUT_MS));
 }
 
 float mpu6050_convert_accel_raw(int16_t raw, mpu6050_accel_range_t range)
@@ -104,11 +89,13 @@ float mpu6050_convert_gyro_raw(int16_t raw, mpu6050_gyro_range_t range)
 
 esp_err_t mpu6050_init(const mpu6050_config_t *config, mpu6050_handle_t *handle)
 {
-    i2c_device_config_t dev_config = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = MPU6050_I2C_ADDRESS,
-        .scl_speed_hz = config != NULL && config->bus_speed_hz != 0 ? config->bus_speed_hz : 400000,
-        .scl_wait_us = 0,
+    const board_config_t *board = board_config_get();
+    i2c_config_t i2c_conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = board->i2c_sda_pin,
+        .scl_io_num = board->i2c_scl_pin,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
     };
     mpu6050_handle_t dev;
     uint8_t who_am_i = 0;
@@ -124,21 +111,13 @@ esp_err_t mpu6050_init(const mpu6050_config_t *config, mpu6050_handle_t *handle)
     }
 
     dev->i2c_port = config->i2c_port;
-    dev->bus_speed_hz = dev_config.scl_speed_hz;
+    dev->bus_speed_hz = config->bus_speed_hz != 0 ? config->bus_speed_hz : 400000;
     dev->accel_range = config->accel_range;
     dev->gyro_range = config->gyro_range;
+    i2c_conf.master.clk_speed = dev->bus_speed_hz;
 
-    ret = ensure_i2c_bus(config->i2c_port, &dev->bus_handle, &dev->owns_bus);
+    ret = i2c_param_config(dev->i2c_port, &i2c_conf);
     if (ret != ESP_OK) {
-        free(dev);
-        return ret;
-    }
-
-    ret = i2c_master_bus_add_device(dev->bus_handle, &dev_config, &dev->dev_handle);
-    if (ret != ESP_OK) {
-        if (dev->owns_bus) {
-            i2c_del_master_bus(dev->bus_handle);
-        }
         free(dev);
         return ret;
     }
@@ -182,7 +161,6 @@ esp_err_t mpu6050_init(const mpu6050_config_t *config, mpu6050_handle_t *handle)
 
 esp_err_t mpu6050_read_sample(mpu6050_handle_t handle, mpu6050_sample_t *sample)
 {
-    uint8_t reg = MPU6050_REG_ACCEL_XOUT_H;
     uint8_t raw[14] = {0};
     int16_t raw_ax;
     int16_t raw_ay;
@@ -197,7 +175,20 @@ esp_err_t mpu6050_read_sample(mpu6050_handle_t handle, mpu6050_sample_t *sample)
         return ESP_ERR_INVALID_ARG;
     }
 
-    ret = i2c_master_transmit_receive(handle->dev_handle, &reg, 1, raw, sizeof(raw), MPU6050_XFER_TIMEOUT_MS);
+    ret = i2c_master_write_to_device(handle->i2c_port,
+        MPU6050_I2C_ADDRESS,
+        (const uint8_t[]){MPU6050_REG_ACCEL_XOUT_H},
+        1,
+        pdMS_TO_TICKS(MPU6050_XFER_TIMEOUT_MS));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    ret = i2c_master_read_from_device(handle->i2c_port,
+        MPU6050_I2C_ADDRESS,
+        raw,
+        sizeof(raw),
+        pdMS_TO_TICKS(MPU6050_XFER_TIMEOUT_MS));
     if (ret != ESP_OK) {
         return ret;
     }
@@ -225,18 +216,10 @@ esp_err_t mpu6050_read_sample(mpu6050_handle_t handle, mpu6050_sample_t *sample)
 
 esp_err_t mpu6050_deinit(mpu6050_handle_t handle)
 {
-    esp_err_t ret = ESP_OK;
-
     if (handle == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (handle->dev_handle != NULL) {
-        ret = i2c_master_bus_rm_device(handle->dev_handle);
-    }
-    if (handle->owns_bus && handle->bus_handle != NULL) {
-        i2c_del_master_bus(handle->bus_handle);
-    }
     free(handle);
-    return ret;
+    return ESP_OK;
 }

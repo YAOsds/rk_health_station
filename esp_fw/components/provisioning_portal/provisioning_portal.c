@@ -13,6 +13,7 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "provisioning_html.h"
 #include "provisioning_scan.h"
@@ -21,6 +22,7 @@
 static const char *TAG = "PROVISION";
 enum {
     PROVISION_SCAN_LIMIT = 20,
+    PROVISION_SCAN_JSON_SIZE = 2048,
 };
 
 static httpd_handle_t s_server;
@@ -30,7 +32,7 @@ static bool s_wifi_started;
 static bool s_wifi_events_registered;
 static esp_event_handler_instance_t s_wifi_event_instance;
 static TaskHandle_t s_heartbeat_task;
-static portMUX_TYPE s_runtime_lock = portMUX_INITIALIZER_UNLOCKED;
+static SemaphoreHandle_t s_runtime_mutex;
 static rk_provisioning_status_t s_runtime;
 
 static void url_decode(char *buffer)
@@ -127,11 +129,29 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, RK_PROVISIONING_HTML);
 }
 
+static esp_err_t ensure_runtime_mutex(void)
+{
+    if (s_runtime_mutex != NULL) {
+        return ESP_OK;
+    }
+
+    s_runtime_mutex = xSemaphoreCreateMutex();
+    return s_runtime_mutex != NULL ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
 static void snapshot_runtime(rk_provisioning_status_t *snapshot)
 {
-    taskENTER_CRITICAL(&s_runtime_lock);
+    if (snapshot == NULL) {
+        return;
+    }
+
+    if (s_runtime_mutex == NULL || xSemaphoreTake(s_runtime_mutex, portMAX_DELAY) != pdTRUE) {
+        memset(snapshot, 0, sizeof(*snapshot));
+        return;
+    }
+
     *snapshot = s_runtime;
-    taskEXIT_CRITICAL(&s_runtime_lock);
+    xSemaphoreGive(s_runtime_mutex);
 }
 
 static void provisioning_heartbeat_task(void *arg)
@@ -184,10 +204,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     if (event_id == WIFI_EVENT_AP_STACONNECTED) {
         const wifi_event_ap_staconnected_t *event = (const wifi_event_ap_staconnected_t *)event_data;
 
-        taskENTER_CRITICAL(&s_runtime_lock);
-        ++s_runtime.connected_clients;
-        clients = s_runtime.connected_clients;
-        taskEXIT_CRITICAL(&s_runtime_lock);
+        if (s_runtime_mutex != NULL && xSemaphoreTake(s_runtime_mutex, portMAX_DELAY) == pdTRUE) {
+            rk_provisioning_status_note_client_event(&s_runtime, true);
+            clients = s_runtime.connected_clients;
+            xSemaphoreGive(s_runtime_mutex);
+        }
 
         ESP_LOGI(TAG, "provisioning client connected aid=%d clients=%u",
             event != NULL ? event->aid : -1,
@@ -195,17 +216,30 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
         const wifi_event_ap_stadisconnected_t *event = (const wifi_event_ap_stadisconnected_t *)event_data;
 
-        taskENTER_CRITICAL(&s_runtime_lock);
-        if (s_runtime.connected_clients > 0) {
-            --s_runtime.connected_clients;
+        if (s_runtime_mutex != NULL && xSemaphoreTake(s_runtime_mutex, portMAX_DELAY) == pdTRUE) {
+            rk_provisioning_status_note_client_event(&s_runtime, false);
+            clients = s_runtime.connected_clients;
+            xSemaphoreGive(s_runtime_mutex);
         }
-        clients = s_runtime.connected_clients;
-        taskEXIT_CRITICAL(&s_runtime_lock);
 
         ESP_LOGI(TAG, "provisioning client disconnected aid=%d clients=%u",
             event != NULL ? event->aid : -1,
             (unsigned)clients);
     }
+}
+
+static void update_scan_runtime(const rk_provisioning_scan_ap_t *aps, size_t normalized)
+{
+    if (s_runtime_mutex == NULL) {
+        return;
+    }
+
+    if (xSemaphoreTake(s_runtime_mutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+
+    rk_provisioning_status_note_scan(&s_runtime, aps, normalized);
+    xSemaphoreGive(s_runtime_mutex);
 }
 
 static esp_err_t scan_get_handler(httpd_req_t *req)
@@ -216,22 +250,43 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
         .channel = 0,
         .show_hidden = false,
     };
-    wifi_ap_record_t ap_records[PROVISION_SCAN_LIMIT] = {0};
-    rk_provisioning_scan_ap_t input[PROVISION_SCAN_LIMIT] = {0};
-    rk_provisioning_scan_ap_t output[PROVISION_SCAN_LIMIT] = {0};
+    wifi_ap_record_t *ap_records = NULL;
+    rk_provisioning_scan_ap_t *input = NULL;
+    rk_provisioning_scan_ap_t *output = NULL;
     uint16_t ap_count = PROVISION_SCAN_LIMIT;
     size_t normalized;
     uint16_t i;
-    char json[2048] = {0};
+    char *json = NULL;
+
+    ap_records = calloc(PROVISION_SCAN_LIMIT, sizeof(*ap_records));
+    input = calloc(PROVISION_SCAN_LIMIT, sizeof(*input));
+    output = calloc(PROVISION_SCAN_LIMIT, sizeof(*output));
+    json = calloc(1, PROVISION_SCAN_JSON_SIZE);
+    if (ap_records == NULL || input == NULL || output == NULL || json == NULL) {
+        free(json);
+        free(output);
+        free(input);
+        free(ap_records);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "[]");
+    }
 
     if (esp_wifi_scan_start(&scan_config, true) != ESP_OK) {
         ESP_LOGW(TAG, "wifi scan start failed");
+        free(json);
+        free(output);
+        free(input);
+        free(ap_records);
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "[]");
     }
 
     if (esp_wifi_scan_get_ap_records(&ap_count, ap_records) != ESP_OK) {
         ESP_LOGW(TAG, "wifi scan collect failed");
+        free(json);
+        free(output);
+        free(input);
+        free(ap_records);
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "[]");
     }
@@ -242,21 +297,16 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
     }
 
     normalized = rk_provisioning_normalize_scan_results(input, ap_count, output, PROVISION_SCAN_LIMIT);
-    if (!rk_provisioning_build_scan_json(output, normalized, json, sizeof(json))) {
+    if (!rk_provisioning_build_scan_json(output, normalized, json, PROVISION_SCAN_JSON_SIZE)) {
+        free(json);
+        free(output);
+        free(input);
+        free(ap_records);
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "[]");
     }
 
-    taskENTER_CRITICAL(&s_runtime_lock);
-    s_runtime.last_scan_count = normalized;
-    if (normalized > 0) {
-        strncpy(s_runtime.last_scan_best_ssid, output[0].ssid, sizeof(s_runtime.last_scan_best_ssid) - 1);
-        s_runtime.last_scan_best_rssi = output[0].rssi;
-    } else {
-        s_runtime.last_scan_best_ssid[0] = '\0';
-        s_runtime.last_scan_best_rssi = 0;
-    }
-    taskEXIT_CRITICAL(&s_runtime_lock);
+    update_scan_runtime(output, normalized);
 
     if (normalized > 0) {
         ESP_LOGI(TAG,
@@ -270,7 +320,12 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
     }
 
     httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, json);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    free(output);
+    free(input);
+    free(ap_records);
+    return ESP_OK;
 }
 
 static esp_err_t save_post_handler(httpd_req_t *req)
@@ -335,6 +390,11 @@ static esp_err_t start_softap(void)
     esp_err_t ret;
 
     ret = ensure_network_stack();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    ret = ensure_runtime_mutex();
     if (ret != ESP_OK) {
         return ret;
     }
@@ -417,6 +477,9 @@ esp_err_t provisioning_portal_start(void)
     };
     esp_err_t ret;
 
+    /* /scan triggers Wi-Fi stack work; keep ample headroom for the HTTP server task. */
+    config.stack_size = 8192;
+
     if (s_server != NULL) {
         return ESP_OK;
     }
@@ -463,6 +526,11 @@ esp_err_t provisioning_portal_stop(void)
     if (s_wifi_started) {
         esp_wifi_stop();
         s_wifi_started = false;
+    }
+
+    if (s_runtime_mutex != NULL) {
+        vSemaphoreDelete(s_runtime_mutex);
+        s_runtime_mutex = NULL;
     }
 
     return ESP_OK;

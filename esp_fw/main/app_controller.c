@@ -1,12 +1,14 @@
 #include "app_controller.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "app_events.h"
 #include "auth_client.h"
 #include "board_config.h"
 #include "device_config.h"
+#include "driver/i2c.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -34,6 +36,7 @@
 
 static const char *TAG = "APP_CTRL";
 static const char *APP_FIRMWARE_VERSION = "0.1.0-dev";
+static bool s_sensor_bus_ready = false;
 
 typedef struct {
     EventGroupHandle_t events;
@@ -44,11 +47,55 @@ typedef struct {
     bool vitals_valid;
 } app_runtime_t;
 
+typedef struct {
+    uint32_t ir_samples[SIGNAL_FILTER_MAX_SAMPLES];
+    uint32_t red_samples[SIGNAL_FILTER_MAX_SAMPLES];
+    float accel_norm_samples[MOTION_HISTORY_CAPACITY];
+    float imu_window[256][6];
+    signal_filter_window_t filter_window;
+} sensor_task_buffers_t;
+
 static app_runtime_t s_runtime;
 
 static int64_t monotonic_ms(void)
 {
     return esp_timer_get_time() / 1000;
+}
+
+static esp_err_t sensor_bus_init(void)
+{
+    const board_config_t *board = board_config_get();
+    i2c_config_t i2c_conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = board->i2c_sda_pin,
+        .scl_io_num = board->i2c_scl_pin,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = 400000,
+    };
+    esp_err_t ret;
+
+    if (s_sensor_bus_ready) {
+        return ESP_OK;
+    }
+
+    ret = i2c_param_config(board->i2c_port, &i2c_conf);
+
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    ret = i2c_driver_install(board->i2c_port, I2C_MODE_MASTER, 0, 0, 0);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    s_sensor_bus_ready = true;
+    ESP_LOGI(TAG, "sensor bus ready on i2c=%d sda=%d scl=%d",
+        (int)board->i2c_port,
+        (int)board->i2c_sda_pin,
+        (int)board->i2c_scl_pin);
+    return ESP_OK;
 }
 
 static esp_err_t init_nvs_flash(void)
@@ -104,6 +151,7 @@ static void sensor_task(void *arg)
 {
     const board_config_t *board = board_config_get();
     const uint32_t ppg_period_ms = board->max30102_period_ms < 10 ? 10 : board->max30102_period_ms;
+    sensor_task_buffers_t *buffers = calloc(1, sizeof(*buffers));
     max30102_config_t max_cfg = {
         .i2c_port = board->i2c_port,
         .bus_speed_hz = 400000,
@@ -119,9 +167,6 @@ static void sensor_task(void *arg)
     };
     max30102_handle_t max_handle = NULL;
     mpu6050_handle_t mpu_handle = NULL;
-    uint32_t ir_samples[SIGNAL_FILTER_MAX_SAMPLES] = {0};
-    uint32_t red_samples[SIGNAL_FILTER_MAX_SAMPLES] = {0};
-    float accel_norm_samples[MOTION_HISTORY_CAPACITY] = {0};
     size_t ppg_count = 0;
     size_t motion_count = 0;
     int64_t next_telemetry_ms = monotonic_ms() + (int64_t)board->telemetry_period_ms;
@@ -129,31 +174,50 @@ static void sensor_task(void *arg)
     imu_window_buffer_t imu_buffer = {0};
     imu_event_state_t imu_state = {0};
     telemetry_imu_fall_t latest_imu_fall = {0};
-    float imu_window[256][6] = {{0}};
     bool fall_classifier_ready = false;
 
     (void)arg;
+
+    if (buffers == NULL) {
+        xEventGroupSetBits(s_runtime.events, APP_EVENT_SENSOR_FAULT);
+        ESP_LOGE(TAG, "sensor task buffer allocation failed");
+        vTaskDelete(NULL);
+        return;
+    }
 
     imu_window_buffer_init(&imu_buffer, 256, 32);
     imu_event_state_init(&imu_state, 2);
 
     while (true) {
         max30102_sample_t ppg_sample = {0};
-        signal_filter_window_t window = {0};
         signal_quality_t quality = {0};
         heart_rate_result_t hr_result = {0};
         telemetry_vitals_t vitals = {0};
         mpu6050_sample_t motion_sample = {0};
         int64_t now_ms = monotonic_ms();
 
+        if ((max_handle == NULL || mpu_handle == NULL) && sensor_bus_init() != ESP_OK) {
+            xEventGroupSetBits(s_runtime.events, APP_EVENT_SENSOR_FAULT);
+            ESP_LOGW(TAG, "sensor bus init failed, retry in %d ms", SENSOR_INIT_RETRY_MS);
+            vTaskDelay(pdMS_TO_TICKS(SENSOR_INIT_RETRY_MS));
+            continue;
+        }
+
         if (max_handle == NULL) {
-            if (max30102_init(&max_cfg, &max_handle) != ESP_OK || max30102_configure(max_handle) != ESP_OK) {
+            esp_err_t ret = max30102_init(&max_cfg, &max_handle);
+            if (ret == ESP_OK) {
+                ret = max30102_configure(max_handle);
+            }
+            if (ret != ESP_OK) {
                 if (max_handle != NULL) {
                     max30102_deinit(max_handle);
                     max_handle = NULL;
                 }
                 xEventGroupSetBits(s_runtime.events, APP_EVENT_SENSOR_FAULT);
-                ESP_LOGW(TAG, "max30102 init failed, retry in %d ms", SENSOR_INIT_RETRY_MS);
+                ESP_LOGW(TAG,
+                    "max30102 init/configure failed: %s, retry in %d ms",
+                    esp_err_to_name(ret),
+                    SENSOR_INIT_RETRY_MS);
                 vTaskDelay(pdMS_TO_TICKS(SENSOR_INIT_RETRY_MS));
                 continue;
             }
@@ -161,13 +225,17 @@ static void sensor_task(void *arg)
         }
 
         if (mpu_handle == NULL) {
-            if (mpu6050_init(&mpu_cfg, &mpu_handle) != ESP_OK) {
+            esp_err_t ret = mpu6050_init(&mpu_cfg, &mpu_handle);
+            if (ret != ESP_OK) {
                 if (mpu_handle != NULL) {
                     mpu6050_deinit(mpu_handle);
                     mpu_handle = NULL;
                 }
                 xEventGroupSetBits(s_runtime.events, APP_EVENT_SENSOR_FAULT);
-                ESP_LOGW(TAG, "mpu6050 init failed, retry in %d ms", SENSOR_INIT_RETRY_MS);
+                ESP_LOGW(TAG,
+                    "mpu6050 init failed: %s, retry in %d ms",
+                    esp_err_to_name(ret),
+                    SENSOR_INIT_RETRY_MS);
                 vTaskDelay(pdMS_TO_TICKS(SENSOR_INIT_RETRY_MS));
                 continue;
             }
@@ -188,14 +256,16 @@ static void sensor_task(void *arg)
             continue;
         }
         if (ppg_count < SIGNAL_FILTER_MAX_SAMPLES) {
-            ir_samples[ppg_count] = ppg_sample.ir;
-            red_samples[ppg_count] = ppg_sample.red;
+            buffers->ir_samples[ppg_count] = ppg_sample.ir;
+            buffers->red_samples[ppg_count] = ppg_sample.red;
             ++ppg_count;
         } else {
-            memmove(ir_samples, ir_samples + 1, (SIGNAL_FILTER_MAX_SAMPLES - 1) * sizeof(ir_samples[0]));
-            memmove(red_samples, red_samples + 1, (SIGNAL_FILTER_MAX_SAMPLES - 1) * sizeof(red_samples[0]));
-            ir_samples[SIGNAL_FILTER_MAX_SAMPLES - 1] = ppg_sample.ir;
-            red_samples[SIGNAL_FILTER_MAX_SAMPLES - 1] = ppg_sample.red;
+            memmove(buffers->ir_samples, buffers->ir_samples + 1,
+                (SIGNAL_FILTER_MAX_SAMPLES - 1) * sizeof(buffers->ir_samples[0]));
+            memmove(buffers->red_samples, buffers->red_samples + 1,
+                (SIGNAL_FILTER_MAX_SAMPLES - 1) * sizeof(buffers->red_samples[0]));
+            buffers->ir_samples[SIGNAL_FILTER_MAX_SAMPLES - 1] = ppg_sample.ir;
+            buffers->red_samples[SIGNAL_FILTER_MAX_SAMPLES - 1] = ppg_sample.red;
         }
 
         if (now_ms >= next_mpu_ms) {
@@ -205,7 +275,8 @@ static void sensor_task(void *arg)
                 mpu_handle = NULL;
                 continue;
             }
-            append_float(accel_norm_samples, MOTION_HISTORY_CAPACITY, &motion_count, motion_sample.accel_norm_g);
+            append_float(
+                buffers->accel_norm_samples, MOTION_HISTORY_CAPACITY, &motion_count, motion_sample.accel_norm_g);
             if (fall_classifier_ready) {
                 imu_sample6_t imu_sample = {
                     .values = {
@@ -219,8 +290,8 @@ static void sensor_task(void *arg)
                 };
                 if (imu_window_buffer_push(&imu_buffer, &imu_sample)) {
                     fall_classifier_result_t cls = {0};
-                    imu_window_buffer_copy_latest(&imu_buffer, imu_window);
-                    if (fall_classifier_run(imu_window, &cls) == ESP_OK) {
+                    imu_window_buffer_copy_latest(&imu_buffer, buffers->imu_window);
+                    if (fall_classifier_run(buffers->imu_window, &cls) == ESP_OK) {
                         imu_event_state_update(&imu_state, &cls);
                         latest_imu_fall.valid = true;
                         latest_imu_fall.label = imu_event_state_current_label(&imu_state);
@@ -240,15 +311,18 @@ static void sensor_task(void *arg)
         }
 
         if (now_ms >= next_telemetry_ms && ppg_count >= PPG_MIN_ANALYSIS_SAMPLES) {
-            memset(&window, 0, sizeof(window));
-            window.sample_count = ppg_count;
-            window.sample_period_ms = ppg_period_ms;
-            memcpy(window.ir_samples, ir_samples, ppg_count * sizeof(ir_samples[0]));
-            memcpy(window.red_samples, red_samples, ppg_count * sizeof(red_samples[0]));
+            memset(&buffers->filter_window, 0, sizeof(buffers->filter_window));
+            buffers->filter_window.sample_count = ppg_count;
+            buffers->filter_window.sample_period_ms = ppg_period_ms;
+            memcpy(buffers->filter_window.ir_samples, buffers->ir_samples,
+                ppg_count * sizeof(buffers->ir_samples[0]));
+            memcpy(buffers->filter_window.red_samples, buffers->red_samples,
+                ppg_count * sizeof(buffers->red_samples[0]));
 
-            if (signal_filter_analyze_window(&window, &quality) == ESP_OK) {
+            if (signal_filter_analyze_window(&buffers->filter_window, &quality) == ESP_OK) {
                 if (motion_count > 0) {
-                    signal_filter_estimate_motion_level(accel_norm_samples, motion_count, &quality.motion_level);
+                    signal_filter_estimate_motion_level(
+                        buffers->accel_norm_samples, motion_count, &quality.motion_level);
                 }
                 system_diag_note_signal_quality(quality.confidence, quality.finger_detected, quality.motion_level);
             }
@@ -418,7 +492,7 @@ void app_controller_run(void)
     ESP_ERROR_CHECK(s_runtime.events != NULL ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(s_runtime.mutex != NULL ? ESP_OK : ESP_ERR_NO_MEM);
 
-    xTaskCreate(sensor_task, "sensor_task", 6144, NULL, 5, NULL);
+    xTaskCreate(sensor_task, "sensor_task", 8192, NULL, 5, NULL);
     xTaskCreate(link_task, "link_task", 5120, NULL, 6, NULL);
     xTaskCreate(telemetry_task, "telemetry_task", 5120, NULL, 5, NULL);
     ESP_LOGI(TAG, "runtime tasks started");

@@ -1,6 +1,40 @@
 #include "provisioning_status.h"
 
 #include <stdio.h>
+#include <string.h>
+
+void rk_provisioning_status_note_client_event(rk_provisioning_status_t *status, bool connected)
+{
+    if (status == NULL) {
+        return;
+    }
+
+    if (connected) {
+        ++status->connected_clients;
+    } else if (status->connected_clients > 0) {
+        --status->connected_clients;
+    }
+}
+
+void rk_provisioning_status_note_scan(
+    rk_provisioning_status_t *status,
+    const rk_provisioning_scan_ap_t *aps,
+    size_t ap_count)
+{
+    if (status == NULL) {
+        return;
+    }
+
+    status->last_scan_count = ap_count;
+    if (aps != NULL && ap_count > 0) {
+        strncpy(status->last_scan_best_ssid, aps[0].ssid, sizeof(status->last_scan_best_ssid) - 1);
+        status->last_scan_best_ssid[sizeof(status->last_scan_best_ssid) - 1] = '\0';
+        status->last_scan_best_rssi = aps[0].rssi;
+    } else {
+        status->last_scan_best_ssid[0] = '\0';
+        status->last_scan_best_rssi = 0;
+    }
+}
 
 bool rk_provisioning_format_heartbeat(
     const rk_provisioning_status_t *status,

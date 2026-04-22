@@ -18,6 +18,12 @@ typedef struct {
     char last_scan_best_ssid[RK_PROVISIONING_SCAN_SSID_LEN];
 } rk_provisioning_status_t;
 
+void rk_provisioning_status_note_client_event(rk_provisioning_status_t *status, bool connected);
+void rk_provisioning_status_note_scan(
+    rk_provisioning_status_t *status,
+    const rk_provisioning_scan_ap_t *aps,
+    size_t ap_count);
+
 bool rk_provisioning_format_heartbeat(
     const rk_provisioning_status_t *status,
     char *buffer,

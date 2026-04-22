@@ -19,6 +19,7 @@ Standalone ESP-IDF firmware for the ESP32-S3 side of `rk_health_station`.
 ```bash
 cd esp_fw
 . ~/esp/esp-idf/export.sh
+idf.py set-target esp32s3
 idf.py build
 ```
 

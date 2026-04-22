@@ -20,8 +20,13 @@
 #include <QMainWindow>
 #include <QPushButton>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+
+namespace {
+constexpr int kDashboardRefreshIntervalMs = 3000;
+}
 
 UiApp::UiApp(QObject *parent)
     : QObject(parent)
@@ -47,7 +52,15 @@ UiApp::UiApp(QObject *parent)
                   QStringLiteral("Select Test Video"),
                   QString(),
                   QStringLiteral("Video Files (*.mp4 *.MP4);;All Files (*)"));
-          })) {
+          }))
+    , dashboardRefreshTimer_(new QTimer(this)) {
+    dashboardRefreshTimer_->setInterval(kDashboardRefreshIntervalMs);
+    connect(dashboardRefreshTimer_, &QTimer::timeout, this, [this]() {
+        if (client_->isConnected()) {
+            client_->requestDashboardSnapshot();
+        }
+    });
+
     auto *central = new QWidget(window_);
     auto *rootLayout = new QVBoxLayout(central);
     auto *navLayout = new QHBoxLayout();
@@ -159,6 +172,7 @@ bool UiApp::start() {
         client_->requestDashboardSnapshot();
         client_->requestPendingDevices();
         client_->requestAlertsSnapshot();
+        dashboardRefreshTimer_->start();
     }
     return connected;
 }

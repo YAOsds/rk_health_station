@@ -11,6 +11,7 @@ class HistoryPage;
 class QMainWindow;
 class QPushButton;
 class QStackedWidget;
+class QTimer;
 class SettingsPage;
 class UiIpcClient;
 class FallIpcClient;
@@ -51,4 +52,5 @@ private:
     VideoIpcClient *videoClient_ = nullptr;
     FallIpcClient *fallClient_ = nullptr;
     VideoMonitorPage *videoMonitorPage_ = nullptr;
+    QTimer *dashboardRefreshTimer_ = nullptr;
 };

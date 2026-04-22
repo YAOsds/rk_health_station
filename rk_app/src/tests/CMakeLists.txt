@@ -493,6 +493,52 @@ target_link_libraries(dashboard_page_test PRIVATE
 
 add_test(NAME dashboard_page_test COMMAND dashboard_page_test)
 
+add_executable(ui_app_dashboard_refresh_test
+    ui_tests/ui_app_dashboard_refresh_test.cpp
+    ../health_ui/app/ui_app.cpp
+    ../health_ui/ipc_client/fall_ipc_client.cpp
+    ../health_ui/ipc_client/ui_ipc_client.cpp
+    ../health_ui/ipc_client/video_ipc_client.cpp
+    ../health_ui/pages/alerts_page.cpp
+    ../health_ui/pages/dashboard_page.cpp
+    ../health_ui/pages/device_approval_page.cpp
+    ../health_ui/pages/device_detail_page.cpp
+    ../health_ui/pages/device_list_page.cpp
+    ../health_ui/pages/history_page.cpp
+    ../health_ui/pages/settings_page.cpp
+    ../health_ui/pages/video_monitor_page.cpp
+    ../health_ui/widgets/video_preview_consumer.cpp
+    ../health_ui/widgets/video_preview_widget.cpp
+)
+
+set_target_properties(ui_app_dashboard_refresh_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(ui_app_dashboard_refresh_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(ui_app_dashboard_refresh_test PRIVATE
+    rk_shared
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_NETWORK_TARGET}
+    ${RK_QT_TEST_TARGET}
+    ${RK_QT_WIDGETS_TARGET}
+)
+
+target_compile_definitions(ui_app_dashboard_refresh_test PRIVATE RK_HAS_QT_MULTIMEDIA=${RK_HAS_QT_MULTIMEDIA})
+
+if(RK_HAS_QT_MULTIMEDIA)
+    target_link_libraries(ui_app_dashboard_refresh_test PRIVATE
+        ${RK_QT_MULTIMEDIA_TARGET}
+        ${RK_QT_MULTIMEDIA_WIDGETS_TARGET}
+    )
+endif()
+
+add_test(NAME ui_app_dashboard_refresh_test COMMAND ui_app_dashboard_refresh_test)
+
 
 add_executable(video_service_test
     video_daemon_tests/video_service_test.cpp

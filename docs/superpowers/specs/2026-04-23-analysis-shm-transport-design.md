@@ -328,6 +328,32 @@ The transport is optimized around one analysis consumer, but multiple socket cli
 - update video daemon analysis backend tests to verify descriptor publication instead of full-payload publication
 - keep end-to-end fall daemon tests asserting that inference still receives correct RGB frames
 
+### Performance Baseline
+
+Performance validation is a required part of this design, not an optional follow-up. The transport change is intended to improve runtime behavior relative to the current socket-payload transport on the current `main` branch, so testing must include an explicit before/after comparison.
+
+Use the current `main` branch as the baseline implementation and compare it against the shared-memory design implementation under the same input conditions. The comparison should use the same RK3588 hardware, the same test media, the same camera/test-mode settings, and the same model assets.
+
+At minimum, collect and compare:
+
+- end-to-end frame delivery latency from `health_videod` publish point to `health_falld` ingest point
+- first-frame-to-first-inference latency in test mode
+- steady-state analysis FPS observed by `health_falld`
+- producer-side dropped-frame count
+- producer CPU usage for `health-videod`
+- consumer CPU usage for `health_falld`
+
+Where available, also record pose-stage timings already exposed by the runtime, especially preprocess time. Because the new design removes large socket payload transport, the expected result is that the shared-memory implementation is no worse than `main` on all headline metrics and measurably better on at least frame-delivery overhead, dropped-frame behavior under load, or CPU cost.
+
+The performance test plan should produce a checked-in result note documenting:
+
+- baseline commit on `main`
+- test commit for the shared-memory design
+- hardware and runtime environment
+- commands used to run the comparison
+- raw measurements
+- a short conclusion stating whether the design delivered the expected improvement
+
 ## Migration Plan
 
 1. Add shared-memory ring and descriptor protocol primitives with tests.

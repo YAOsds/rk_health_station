@@ -1,10 +1,30 @@
+#include "analysis/shared_memory_frame_ring.h"
 #include "ingest/analysis_stream_client.h"
-#include "protocol/analysis_stream_protocol.h"
+#include "protocol/analysis_frame_descriptor_protocol.h"
 
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSignalSpy>
 #include <QtTest/QTest>
+
+namespace {
+AnalysisFrameDescriptor publishPacketDescriptor(
+    SharedMemoryFrameRingWriter *writer, const AnalysisFramePacket &packet) {
+    const SharedFramePublishResult publish = writer->publish(packet);
+
+    AnalysisFrameDescriptor descriptor;
+    descriptor.frameId = packet.frameId;
+    descriptor.timestampMs = packet.timestampMs;
+    descriptor.cameraId = packet.cameraId;
+    descriptor.width = packet.width;
+    descriptor.height = packet.height;
+    descriptor.pixelFormat = packet.pixelFormat;
+    descriptor.slotIndex = publish.slotIndex;
+    descriptor.sequence = publish.sequence;
+    descriptor.payloadBytes = publish.payloadBytes;
+    return descriptor;
+}
+}
 
 class AnalysisStreamClientTest : public QObject {
     Q_OBJECT
@@ -22,9 +42,15 @@ void AnalysisStreamClientTest::decodesIncomingFramePackets() {
     QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_test.sock"));
     QVERIFY(server.listen(QStringLiteral("/tmp/rk_video_analysis_test.sock")));
 
+    SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 4, 640 * 640 * 3);
+    QVERIFY(writer.initialize());
+
     AnalysisFramePacket packet;
     packet.frameId = 11;
+    packet.timestampMs = 100;
     packet.cameraId = QStringLiteral("front_cam");
+    packet.width = 640;
+    packet.height = 640;
     packet.width = 640;
     packet.height = 640;
     packet.payload = QByteArray("jpeg-bytes");
@@ -36,7 +62,7 @@ void AnalysisStreamClientTest::decodesIncomingFramePackets() {
     QVERIFY(server.waitForNewConnection(2000));
     QLocalSocket *socket = server.nextPendingConnection();
     QVERIFY(socket != nullptr);
-    socket->write(encodeAnalysisFramePacket(packet));
+    socket->write(encodeAnalysisFrameDescriptor(publishPacketDescriptor(&writer, packet)));
     socket->flush();
 
     QTRY_VERIFY_WITH_TIMEOUT(spy.count() == 1, 2000);
@@ -47,8 +73,12 @@ void AnalysisStreamClientTest::decodesRgbFramePackets() {
     QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_rgb_test.sock"));
     QVERIFY(server.listen(QStringLiteral("/tmp/rk_video_analysis_rgb_test.sock")));
 
+    SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 4, 4 * 3 * 3);
+    QVERIFY(writer.initialize());
+
     AnalysisFramePacket packet;
     packet.frameId = 55;
+    packet.timestampMs = 200;
     packet.cameraId = QStringLiteral("front_cam");
     packet.width = 4;
     packet.height = 3;
@@ -62,7 +92,7 @@ void AnalysisStreamClientTest::decodesRgbFramePackets() {
     QVERIFY(server.waitForNewConnection(2000));
     QLocalSocket *socket = server.nextPendingConnection();
     QVERIFY(socket != nullptr);
-    socket->write(encodeAnalysisFramePacket(packet));
+    socket->write(encodeAnalysisFrameDescriptor(publishPacketDescriptor(&writer, packet)));
     socket->flush();
 
     QTRY_VERIFY_WITH_TIMEOUT(spy.count() == 1, 2000);
@@ -76,14 +106,25 @@ void AnalysisStreamClientTest::keepsLatestPacketFromSingleReadBurst() {
     QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_test2.sock"));
     QVERIFY(server.listen(QStringLiteral("/tmp/rk_video_analysis_test2.sock")));
 
+    SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 4, 3);
+    QVERIFY(writer.initialize());
+
     AnalysisFramePacket first;
     first.frameId = 21;
+    first.timestampMs = 300;
     first.cameraId = QStringLiteral("front_cam");
+    first.width = 1;
+    first.height = 1;
+    first.pixelFormat = AnalysisPixelFormat::Jpeg;
     first.payload = QByteArray("one");
 
     AnalysisFramePacket second;
     second.frameId = 22;
+    second.timestampMs = 301;
     second.cameraId = QStringLiteral("front_cam");
+    second.width = 1;
+    second.height = 1;
+    second.pixelFormat = AnalysisPixelFormat::Jpeg;
     second.payload = QByteArray("two");
 
     AnalysisStreamClient client(QStringLiteral("/tmp/rk_video_analysis_test2.sock"));
@@ -93,7 +134,8 @@ void AnalysisStreamClientTest::keepsLatestPacketFromSingleReadBurst() {
     QVERIFY(server.waitForNewConnection(2000));
     QLocalSocket *socket = server.nextPendingConnection();
     QVERIFY(socket != nullptr);
-    socket->write(encodeAnalysisFramePacket(first) + encodeAnalysisFramePacket(second));
+    socket->write(encodeAnalysisFrameDescriptor(publishPacketDescriptor(&writer, first))
+        + encodeAnalysisFrameDescriptor(publishPacketDescriptor(&writer, second)));
     socket->flush();
 
     QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 2000);
@@ -109,14 +151,25 @@ void AnalysisStreamClientTest::reconnectsAfterServerRestarts() {
     QLocalServer firstServer;
     QVERIFY(firstServer.listen(socketName));
 
+    SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 4, 3);
+    QVERIFY(writer.initialize());
+
     AnalysisFramePacket first;
     first.frameId = 31;
+    first.timestampMs = 400;
     first.cameraId = QStringLiteral("front_cam");
+    first.width = 1;
+    first.height = 1;
+    first.pixelFormat = AnalysisPixelFormat::Jpeg;
     first.payload = QByteArray("one");
 
     AnalysisFramePacket second;
     second.frameId = 32;
+    second.timestampMs = 401;
     second.cameraId = QStringLiteral("front_cam");
+    second.width = 1;
+    second.height = 1;
+    second.pixelFormat = AnalysisPixelFormat::Jpeg;
     second.payload = QByteArray("two");
 
     AnalysisStreamClient client(socketName);
@@ -127,7 +180,7 @@ void AnalysisStreamClientTest::reconnectsAfterServerRestarts() {
     QVERIFY(firstServer.waitForNewConnection(2000));
     QLocalSocket *firstSocket = firstServer.nextPendingConnection();
     QVERIFY(firstSocket != nullptr);
-    firstSocket->write(encodeAnalysisFramePacket(first));
+    firstSocket->write(encodeAnalysisFrameDescriptor(publishPacketDescriptor(&writer, first)));
     firstSocket->flush();
     QTRY_VERIFY_WITH_TIMEOUT(frameSpy.count() == 1, 2000);
 
@@ -143,7 +196,7 @@ void AnalysisStreamClientTest::reconnectsAfterServerRestarts() {
     QTRY_VERIFY_WITH_TIMEOUT(secondServer.hasPendingConnections(), 3000);
     QLocalSocket *secondSocket = secondServer.nextPendingConnection();
     QVERIFY(secondSocket != nullptr);
-    secondSocket->write(encodeAnalysisFramePacket(second));
+    secondSocket->write(encodeAnalysisFrameDescriptor(publishPacketDescriptor(&writer, second)));
     secondSocket->flush();
 
     QTRY_VERIFY_WITH_TIMEOUT(frameSpy.count() == 2, 3000);
@@ -156,17 +209,28 @@ void AnalysisStreamClientTest::clearsPartialPacketBufferBeforeReconnect() {
     QLocalServer firstServer;
     QVERIFY(firstServer.listen(socketName));
 
+    SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 4, 3);
+    QVERIFY(writer.initialize());
+
     AnalysisFramePacket first;
     first.frameId = 41;
+    first.timestampMs = 500;
     first.cameraId = QStringLiteral("front_cam");
+    first.width = 1;
+    first.height = 1;
+    first.pixelFormat = AnalysisPixelFormat::Jpeg;
     first.payload = QByteArray("one");
 
     AnalysisFramePacket second;
     second.frameId = 42;
+    second.timestampMs = 501;
     second.cameraId = QStringLiteral("front_cam");
+    second.width = 1;
+    second.height = 1;
+    second.pixelFormat = AnalysisPixelFormat::Jpeg;
     second.payload = QByteArray("two");
 
-    const QByteArray firstEncoded = encodeAnalysisFramePacket(first);
+    const QByteArray firstEncoded = encodeAnalysisFrameDescriptor(publishPacketDescriptor(&writer, first));
     const int splitIndex = firstEncoded.size() / 2;
 
     AnalysisStreamClient client(socketName);
@@ -190,7 +254,7 @@ void AnalysisStreamClientTest::clearsPartialPacketBufferBeforeReconnect() {
     QTRY_VERIFY_WITH_TIMEOUT(secondServer.hasPendingConnections(), 3000);
     QLocalSocket *secondSocket = secondServer.nextPendingConnection();
     QVERIFY(secondSocket != nullptr);
-    secondSocket->write(encodeAnalysisFramePacket(second));
+    secondSocket->write(encodeAnalysisFrameDescriptor(publishPacketDescriptor(&writer, second)));
     secondSocket->flush();
 
     QTRY_VERIFY_WITH_TIMEOUT(frameSpy.count() == 1, 3000);

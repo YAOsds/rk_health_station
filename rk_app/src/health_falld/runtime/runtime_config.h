@@ -8,6 +8,7 @@ struct FallRuntimeConfig {
     QString cameraId = QStringLiteral("front_cam");
     QString socketName = QStringLiteral("rk_fall.sock");
     QString analysisSocketPath = QStringLiteral("/tmp/rk_video_analysis.sock");
+    QString analysisSharedMemoryName;
     QString poseModelPath = QStringLiteral("assets/models/yolov8n-pose.rknn");
     QString stgcnModelPath = QStringLiteral("assets/models/stgcn_fall.rknn");
     QString lstmModelPath = QStringLiteral("assets/models/lstm_fall.rknn");

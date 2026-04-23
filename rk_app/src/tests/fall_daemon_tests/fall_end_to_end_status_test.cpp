@@ -1,5 +1,6 @@
+#include "analysis/shared_memory_frame_ring.h"
 #include "app/fall_daemon_app.h"
-#include "protocol/analysis_stream_protocol.h"
+#include "protocol/analysis_frame_descriptor_protocol.h"
 
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -90,14 +91,30 @@ QJsonObject waitForMessageType(QLocalSocket *socket, const QString &type, int ti
 void streamJpegAnalysisFrames(
     QLocalSocket *analysisSocket, quint64 firstFrameId, quint64 lastFrameId, int waitMs = 5) {
     QVERIFY(analysisSocket != nullptr);
+    static SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 4, 640 * 640 * 3);
+    static bool writerReady = writer.initialize();
+    QVERIFY(writerReady);
     for (quint64 frameId = firstFrameId; frameId <= lastFrameId; ++frameId) {
         AnalysisFramePacket packet;
         packet.frameId = frameId;
+        packet.timestampMs = static_cast<qint64>(frameId);
         packet.cameraId = QStringLiteral("front_cam");
         packet.width = 640;
         packet.height = 640;
         packet.payload = QByteArray("jpeg-bytes");
-        analysisSocket->write(encodeAnalysisFramePacket(packet));
+        const SharedFramePublishResult publish = writer.publish(packet);
+
+        AnalysisFrameDescriptor descriptor;
+        descriptor.frameId = packet.frameId;
+        descriptor.timestampMs = packet.timestampMs;
+        descriptor.cameraId = packet.cameraId;
+        descriptor.width = packet.width;
+        descriptor.height = packet.height;
+        descriptor.pixelFormat = packet.pixelFormat;
+        descriptor.slotIndex = publish.slotIndex;
+        descriptor.sequence = publish.sequence;
+        descriptor.payloadBytes = publish.payloadBytes;
+        analysisSocket->write(encodeAnalysisFrameDescriptor(descriptor));
         analysisSocket->flush();
         QTest::qWait(waitMs);
     }
@@ -321,11 +338,26 @@ void FallEndToEndStatusTest::updatesInferTimestampAfterFrameArrives() {
 
     AnalysisFramePacket packet;
     packet.frameId = 31;
+    packet.timestampMs = 31;
     packet.cameraId = QStringLiteral("front_cam");
     packet.width = 640;
     packet.height = 640;
     packet.payload = QByteArray("jpeg-bytes");
-    analysisSocket->write(encodeAnalysisFramePacket(packet));
+    SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 4, 640 * 640 * 3);
+    QVERIFY(writer.initialize());
+    const SharedFramePublishResult publish = writer.publish(packet);
+
+    AnalysisFrameDescriptor descriptor;
+    descriptor.frameId = packet.frameId;
+    descriptor.timestampMs = packet.timestampMs;
+    descriptor.cameraId = packet.cameraId;
+    descriptor.width = packet.width;
+    descriptor.height = packet.height;
+    descriptor.pixelFormat = packet.pixelFormat;
+    descriptor.slotIndex = publish.slotIndex;
+    descriptor.sequence = publish.sequence;
+    descriptor.payloadBytes = publish.payloadBytes;
+    analysisSocket->write(encodeAnalysisFrameDescriptor(descriptor));
     analysisSocket->flush();
 
     QLocalSocket socket;

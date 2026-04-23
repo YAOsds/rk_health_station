@@ -4,7 +4,7 @@
 
 class SharedMemoryFrameReader {
 public:
-    SharedMemoryFrameReader() = default;
+    explicit SharedMemoryFrameReader(const QString &sharedMemoryNameOverride = QString());
     ~SharedMemoryFrameReader();
 
     bool read(const AnalysisFrameDescriptor &descriptor,
@@ -18,6 +18,7 @@ private:
 
     QString cameraId_;
     QString shmName_;
+    QString sharedMemoryNameOverride_;
     int fd_ = -1;
     qsizetype mapBytes_ = 0;
     void *mapped_ = nullptr;

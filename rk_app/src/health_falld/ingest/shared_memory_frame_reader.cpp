@@ -5,6 +5,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+SharedMemoryFrameReader::SharedMemoryFrameReader(const QString &sharedMemoryNameOverride)
+    : sharedMemoryNameOverride_(sharedMemoryNameOverride) {
+}
+
 SharedMemoryFrameReader::~SharedMemoryFrameReader() {
     cleanup();
 }
@@ -69,7 +73,9 @@ bool SharedMemoryFrameReader::ensureMapped(const QString &cameraId, QString *err
     }
 
     cleanup();
-    shmName_ = sharedMemoryNameForCamera(cameraId);
+    shmName_ = sharedMemoryNameOverride_.isEmpty()
+        ? sharedMemoryNameForCamera(cameraId)
+        : sharedMemoryNameOverride_;
     fd_ = ::shm_open(shmName_.toUtf8().constData(), O_RDONLY, 0);
     if (fd_ < 0) {
         if (error) {

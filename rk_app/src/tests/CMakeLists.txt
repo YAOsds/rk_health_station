@@ -927,7 +927,9 @@ add_test(NAME track_manager_test COMMAND track_manager_test)
 
 add_executable(analysis_stream_client_test
     fall_daemon_tests/analysis_stream_client_test.cpp
+    ../health_falld/ingest/shared_memory_frame_reader.cpp
     ../health_falld/ingest/analysis_stream_client.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
 )
 
 set_target_properties(analysis_stream_client_test PROPERTIES
@@ -936,6 +938,7 @@ set_target_properties(analysis_stream_client_test PROPERTIES
 
 target_include_directories(analysis_stream_client_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 
@@ -1170,8 +1173,10 @@ add_executable(fall_end_to_end_status_test
     ../health_falld/domain/fall_detector_service.cpp
     ../health_falld/domain/fall_event_policy.cpp
     ../health_falld/ingest/analysis_stream_client.cpp
+    ../health_falld/ingest/shared_memory_frame_reader.cpp
     ../health_falld/ipc/fall_gateway.cpp
     ../health_falld/pose/rknn_pose_estimator.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
     ../health_falld/tracking/association.cpp
     ../health_falld/tracking/byte_tracker.cpp
     ../health_falld/tracking/kalman_filter.cpp
@@ -1186,6 +1191,7 @@ set_target_properties(fall_end_to_end_status_test PROPERTIES
 
 target_include_directories(fall_end_to_end_status_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 

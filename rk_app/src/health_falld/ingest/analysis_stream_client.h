@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ingest/shared_memory_frame_reader.h"
 #include "models/fall_models.h"
 
 #include <QObject>
@@ -11,7 +12,8 @@ class AnalysisStreamClient : public QObject {
     Q_OBJECT
 
 public:
-    explicit AnalysisStreamClient(const QString &socketName, QObject *parent = nullptr);
+    explicit AnalysisStreamClient(const QString &socketName,
+        const QString &sharedMemoryNameOverride = QString(), QObject *parent = nullptr);
 
     void start();
     void stop();
@@ -29,5 +31,6 @@ private:
     QLocalSocket *socket_ = nullptr;
     QTimer *reconnectTimer_ = nullptr;
     QByteArray readBuffer_;
+    SharedMemoryFrameReader reader_;
     bool running_ = false;
 };

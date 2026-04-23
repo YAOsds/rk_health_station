@@ -61,7 +61,8 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
     , trackTraceLogger_(config_.trackTracePath)
     , latencyMarkerWriter_(std::make_unique<LatencyMarkerWriter>(
           qEnvironmentVariable(kFallLatencyMarkerEnvVar)))
-    , ingestClient_(new AnalysisStreamClient(config_.analysisSocketPath, this))
+    , ingestClient_(new AnalysisStreamClient(
+          config_.analysisSocketPath, config_.analysisSharedMemoryName, this))
     , gateway_(new FallGateway(FallRuntimeStatus(), this)) {
     connect(ingestClient_, &AnalysisStreamClient::statusChanged, this, [this](bool connected) {
         runtimeStatus_.inputConnected = connected;

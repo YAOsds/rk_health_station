@@ -8,6 +8,7 @@
 enum class AnalysisPixelFormat {
     Jpeg = 0,
     Nv12 = 1,
+    Rgb = 2,
 };
 
 struct AnalysisFramePacket {

@@ -76,7 +76,14 @@ void AnalysisStreamClient::onReadyRead() {
     readBuffer_.append(socket_->readAll());
 
     AnalysisFramePacket packet;
+    AnalysisFramePacket latestPacket;
+    bool hasPacket = false;
     while (takeFirstAnalysisFramePacket(&readBuffer_, &packet)) {
-        emit frameReceived(packet);
+        latestPacket = packet;
+        hasPacket = true;
+    }
+
+    if (hasPacket) {
+        emit frameReceived(latestPacket);
     }
 }

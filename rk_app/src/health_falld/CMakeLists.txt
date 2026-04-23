@@ -44,6 +44,10 @@ add_executable(health-falld
     ingest/analysis_stream_client.h
     ipc/fall_gateway.cpp
     ipc/fall_gateway.h
+    pose/nv12_preprocessor.cpp
+    pose/nv12_preprocessor.h
+    pose/pose_stage_timing_logger.cpp
+    pose/pose_stage_timing_logger.h
     pose/rknn_pose_estimator.cpp
     pose/rknn_pose_estimator.h
     pose/pose_estimator.h

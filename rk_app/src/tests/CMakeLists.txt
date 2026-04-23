@@ -59,6 +59,21 @@ target_link_libraries(analysis_stream_protocol_test PRIVATE
 
 add_test(NAME analysis_stream_protocol_test COMMAND analysis_stream_protocol_test)
 
+add_executable(latency_marker_writer_test
+    protocol_tests/latency_marker_writer_test.cpp
+)
+
+set_target_properties(latency_marker_writer_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(latency_marker_writer_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME latency_marker_writer_test COMMAND latency_marker_writer_test)
+
 add_executable(fall_protocol_test
     protocol_tests/fall_protocol_test.cpp
 )
@@ -914,6 +929,72 @@ target_link_libraries(fall_runtime_pose_stub_test PRIVATE
 )
 
 add_test(NAME fall_runtime_pose_stub_test COMMAND fall_runtime_pose_stub_test)
+
+add_executable(nv12_preprocessor_test
+    fall_daemon_tests/nv12_preprocessor_test.cpp
+    ../health_falld/pose/nv12_preprocessor.cpp
+)
+
+set_target_properties(nv12_preprocessor_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(nv12_preprocessor_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(nv12_preprocessor_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+    ${RK_QT_WIDGETS_TARGET}
+)
+
+add_test(NAME nv12_preprocessor_test COMMAND nv12_preprocessor_test)
+
+add_executable(rgb_pose_fast_path_test
+    fall_daemon_tests/rgb_pose_fast_path_test.cpp
+    ../health_falld/pose/nv12_preprocessor.cpp
+)
+
+set_target_properties(rgb_pose_fast_path_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(rgb_pose_fast_path_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(rgb_pose_fast_path_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+    ${RK_QT_WIDGETS_TARGET}
+)
+
+add_test(NAME rgb_pose_fast_path_test COMMAND rgb_pose_fast_path_test)
+
+add_executable(pose_stage_timing_logger_test
+    fall_daemon_tests/pose_stage_timing_logger_test.cpp
+    ../health_falld/pose/pose_stage_timing_logger.cpp
+)
+
+set_target_properties(pose_stage_timing_logger_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(pose_stage_timing_logger_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(pose_stage_timing_logger_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME pose_stage_timing_logger_test COMMAND pose_stage_timing_logger_test)
 
 add_executable(fall_event_policy_test
     fall_daemon_tests/fall_event_policy_test.cpp

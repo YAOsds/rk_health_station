@@ -1,5 +1,6 @@
 #include "core/video_service.h"
 
+#include "debug/latency_marker_writer.h"
 #include "analysis/gstreamer_analysis_output_backend.h"
 #include "pipeline/gstreamer_video_pipeline_backend.h"
 #include "pipeline/video_pipeline_backend.h"
@@ -13,6 +14,7 @@ const char kDefaultCameraId[] = "front_cam";
 const char kDefaultDevicePath[] = "/dev/video11";
 const char kDefaultStorageDir[] = "/home/elf/videosurv/";
 const char kAnalysisEnabledEnvVar[] = "RK_VIDEO_ANALYSIS_ENABLED";
+const char kVideoLatencyMarkerEnvVar[] = "RK_VIDEO_LATENCY_MARKER_PATH";
 }
 
 VideoService::VideoService(
@@ -23,6 +25,7 @@ VideoService::VideoService(
     , ownsPipelineBackend_(!pipelineBackend)
     , ownsAnalysisBackend_(!analysisBackend) {
     pipelineBackend_->setObserver(this);
+    pipelineBackend_->setAnalysisFrameSource(analysisBackend_);
     initializeDefaultChannels();
 }
 
@@ -257,6 +260,14 @@ VideoCommandResult VideoService::startTestInput(const QString &cameraId, const Q
             QStringLiteral("test_input_start_failed"));
     }
 
+    LatencyMarkerWriter marker(qEnvironmentVariable(kVideoLatencyMarkerEnvVar));
+    marker.writeEvent(QStringLiteral("playback_started"), QDateTime::currentMSecsSinceEpoch(),
+        QJsonObject{
+            {QStringLiteral("camera_id"), cameraId},
+            {QStringLiteral("file_path"), channel.testFilePath},
+            {QStringLiteral("input_mode"), channel.inputMode},
+        });
+
     return buildOkResult(cameraId, QStringLiteral("start_test_input"),
         videoChannelStatusToJson(channels_.value(cameraId)));
 }
@@ -326,9 +337,17 @@ bool VideoService::ensurePreview(const QString &cameraId, QString *errorCode) {
         return true;
     }
 
+    if (!syncAnalysisOutput(cameraId, errorCode)) {
+        channel.cameraState = VideoCameraState::Error;
+        channel.lastError = errorCode ? *errorCode : QStringLiteral("analysis_unavailable");
+        return false;
+    }
+
     QString previewUrl;
     QString error;
     if (!pipelineBackend_->startPreview(channel, &previewUrl, &error)) {
+        QString analysisError;
+        analysisBackend_->stop(cameraId, &analysisError);
         channel.cameraState = VideoCameraState::Error;
         channel.lastError = error;
         if (errorCode) {
@@ -340,7 +359,6 @@ bool VideoService::ensurePreview(const QString &cameraId, QString *errorCode) {
     channel.previewUrl = previewUrl;
     channel.cameraState = channel.recording ? VideoCameraState::Recording : VideoCameraState::Previewing;
     channel.lastError.clear();
-    syncAnalysisOutput(cameraId);
     return true;
 }
 
@@ -405,17 +423,32 @@ bool VideoService::analysisEnabledForCamera(const QString &cameraId) const {
     return qEnvironmentVariableIntValue(kAnalysisEnabledEnvVar) == 1;
 }
 
-void VideoService::syncAnalysisOutput(const QString &cameraId) {
-    if (!analysisBackend_ || !channels_.contains(cameraId)) {
-        return;
+bool VideoService::syncAnalysisOutput(const QString &cameraId, QString *errorCode) {
+    if (errorCode) {
+        errorCode->clear();
     }
 
     QString error;
-    if (analysisEnabledForCamera(cameraId)) {
-        analysisBackend_->start(channels_.value(cameraId), &error);
-    } else {
-        analysisBackend_->stop(cameraId, &error);
+    if (!analysisBackend_) {
+        return true;
     }
+
+    if (cameraId.isEmpty() || !channels_.contains(cameraId)) {
+        return true;
+    }
+
+    if (analysisEnabledForCamera(cameraId)) {
+        if (!analysisBackend_->start(channels_.value(cameraId), &error)) {
+            if (errorCode) {
+                *errorCode = QStringLiteral("analysis_unavailable");
+            }
+            return false;
+        }
+        return true;
+    }
+
+    analysisBackend_->stop(cameraId, &error);
+    return true;
 }
 
 void VideoService::onPipelinePlaybackFinished(const QString &cameraId) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/fall_detector_service.h"
+#include "debug/latency_marker_writer.h"
 #include "models/fall_models.h"
 #include "pose/pose_estimator.h"
 #include "pose/pose_types.h"
@@ -34,6 +35,9 @@ private:
     ByteTracker tracker_;
     TrackIconRegistry trackIconRegistry_;
     TrackTraceLogger trackTraceLogger_;
+    std::unique_ptr<LatencyMarkerWriter> latencyMarkerWriter_;
+    bool firstFrameMarkerWritten_ = false;
+    bool firstClassificationMarkerWritten_ = false;
     AnalysisStreamClient *ingestClient_ = nullptr;
     FallGateway *gateway_ = nullptr;
 };

@@ -35,7 +35,7 @@ private:
     bool validateTestFilePath(const QString &filePath, QString *errorCode) const;
     void resetTestModeState(VideoChannelStatus *channel) const;
     bool analysisEnabledForCamera(const QString &cameraId) const;
-    void syncAnalysisOutput(const QString &cameraId);
+    bool syncAnalysisOutput(const QString &cameraId, QString *errorCode);
     QString nextSnapshotPath(const QString &storageDir) const;
     QString nextRecordPath(const QString &storageDir) const;
     void onPipelinePlaybackFinished(const QString &cameraId) override;

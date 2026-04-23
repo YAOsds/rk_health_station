@@ -1,6 +1,9 @@
 #include "pose/rknn_pose_estimator.h"
+#include "pose/nv12_preprocessor.h"
+#include "pose/pose_stage_timing_logger.h"
 
 #ifdef RKAPP_ENABLE_REAL_RKNN_POSE
+#include <QElapsedTimer>
 #include <QImage>
 #include <QPainter>
 
@@ -12,6 +15,8 @@ struct RknnPoseRuntime {
 };
 
 namespace {
+const char kPoseTimingPathEnvVar[] = "RK_FALL_POSE_TIMING_PATH";
+
 void releaseRuntime(RknnPoseRuntime *runtime) {
     if (!runtime) {
         return;
@@ -34,6 +39,47 @@ void releaseRuntime(RknnPoseRuntime *runtime) {
         runtime->postProcessReady = false;
     }
     delete runtime;
+}
+
+PosePreprocessResult preprocessDecodedImageForPose(
+    const QImage &inputImage, int targetWidth, int targetHeight, QString *error) {
+    PosePreprocessResult result;
+    if (error) {
+        error->clear();
+    }
+
+    if (inputImage.isNull() || targetWidth <= 0 || targetHeight <= 0) {
+        if (error) {
+            *error = QStringLiteral("pose_input_invalid_image");
+        }
+        return result;
+    }
+
+    QImage letterboxed(targetWidth, targetHeight, QImage::Format_RGB888);
+    letterboxed.fill(QColor(114, 114, 114));
+
+    const qreal scale = qMin(
+        static_cast<qreal>(targetWidth) / inputImage.width(),
+        static_cast<qreal>(targetHeight) / inputImage.height());
+    const int scaledWidth = qRound(inputImage.width() * scale);
+    const int scaledHeight = qRound(inputImage.height() * scale);
+    const int xPad = (targetWidth - scaledWidth) / 2;
+    const int yPad = (targetHeight - scaledHeight) / 2;
+
+    {
+        QPainter painter(&letterboxed);
+        painter.drawImage(QRect(xPad, yPad, scaledWidth, scaledHeight), inputImage);
+    }
+
+    result.packedRgb.resize(targetWidth * targetHeight * 3);
+    for (int y = 0; y < targetHeight; ++y) {
+        memcpy(result.packedRgb.data() + (y * targetWidth * 3),
+            letterboxed.constScanLine(y), targetWidth * 3);
+    }
+    result.xPad = xPad;
+    result.yPad = yPad;
+    result.scale = static_cast<float>(scale);
+    return result;
 }
 }
 #endif
@@ -145,6 +191,10 @@ bool RknnPoseEstimator::loadModel(const QString &path, QString *error) {
 QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, QString *error) {
 #ifdef RKAPP_ENABLE_REAL_RKNN_POSE
     auto *runtime = static_cast<RknnPoseRuntime *>(runtime_);
+    PoseStageTimingLogger poseTimingLogger(qEnvironmentVariable(kPoseTimingPathEnvVar));
+    PoseStageTimingSample poseTimingSample;
+    QElapsedTimer totalTimer;
+    totalTimer.start();
     if (!runtime) {
         if (error) {
             *error = QStringLiteral("pose_model_not_loaded");
@@ -152,47 +202,70 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
         return {};
     }
 
-    QImage inputImage = QImage::fromData(frame.payload, "JPEG").convertToFormat(QImage::Format_RGB888);
-    if (inputImage.isNull()) {
-        if (error) {
-            *error = QStringLiteral("pose_input_decode_failed");
-        }
-        return {};
-    }
-
     const int targetWidth = runtime->appCtx.model_width;
     const int targetHeight = runtime->appCtx.model_height;
-    QImage letterboxed(targetWidth, targetHeight, QImage::Format_RGB888);
-    letterboxed.fill(QColor(114, 114, 114));
+    PosePreprocessResult preprocessed;
+    const char *inputBuffer = nullptr;
+    int inputSize = 0;
+    QElapsedTimer stageTimer;
+    stageTimer.start();
+    if (frame.pixelFormat == AnalysisPixelFormat::Nv12) {
+        preprocessed = preprocessNv12ForPose(frame, targetWidth, targetHeight, error);
+        if (error && !error->isEmpty()) {
+            return {};
+        }
+        inputBuffer = preprocessed.packedRgb.constData();
+        inputSize = preprocessed.packedRgb.size();
+    } else if (frame.pixelFormat == AnalysisPixelFormat::Rgb) {
+        QString fastPathError;
+        if (canUseRgbPoseFastPath(frame, targetWidth, targetHeight, &fastPathError)) {
+            inputBuffer = frame.payload.constData();
+            inputSize = frame.payload.size();
+            preprocessed.xPad = 0;
+            preprocessed.yPad = 0;
+            preprocessed.scale = 1.0f;
+        } else if (!fastPathError.isEmpty()) {
+            if (error) {
+                *error = fastPathError;
+            }
+            return {};
+        } else {
+            preprocessed = preprocessRgbFrameForPose(frame, targetWidth, targetHeight, error);
+            if (error && !error->isEmpty()) {
+                return {};
+            }
+            inputBuffer = preprocessed.packedRgb.constData();
+            inputSize = preprocessed.packedRgb.size();
+        }
+    } else {
+        QImage inputImage = QImage::fromData(frame.payload, "JPEG").convertToFormat(QImage::Format_RGB888);
+        if (inputImage.isNull()) {
+            if (error) {
+                *error = QStringLiteral("pose_input_decode_failed");
+            }
+            return {};
+        }
 
-    const qreal scale = qMin(
-        static_cast<qreal>(targetWidth) / inputImage.width(),
-        static_cast<qreal>(targetHeight) / inputImage.height());
-    const int scaledWidth = qRound(inputImage.width() * scale);
-    const int scaledHeight = qRound(inputImage.height() * scale);
-    const int xPad = (targetWidth - scaledWidth) / 2;
-    const int yPad = (targetHeight - scaledHeight) / 2;
-
-    {
-        QPainter painter(&letterboxed);
-        painter.drawImage(QRect(xPad, yPad, scaledWidth, scaledHeight), inputImage);
+        preprocessed = preprocessDecodedImageForPose(inputImage, targetWidth, targetHeight, error);
+        if (error && !error->isEmpty()) {
+            return {};
+        }
+        inputBuffer = preprocessed.packedRgb.constData();
+        inputSize = preprocessed.packedRgb.size();
     }
-
-    QByteArray packed;
-    packed.resize(targetWidth * targetHeight * 3);
-    for (int y = 0; y < targetHeight; ++y) {
-        memcpy(packed.data() + (y * targetWidth * 3), letterboxed.constScanLine(y), targetWidth * 3);
-    }
+    poseTimingSample.preprocessMs = stageTimer.elapsed();
 
     rknn_input input;
     memset(&input, 0, sizeof(input));
     input.index = 0;
     input.type = RKNN_TENSOR_UINT8;
     input.fmt = RKNN_TENSOR_NHWC;
-    input.size = packed.size();
-    input.buf = packed.data();
+    input.size = inputSize;
+    input.buf = const_cast<char *>(inputBuffer);
 
+    stageTimer.restart();
     int ret = rknn_inputs_set(runtime->appCtx.rknn_ctx, runtime->appCtx.io_num.n_input, &input);
+    poseTimingSample.inputsSetMs = stageTimer.elapsed();
     if (ret < 0) {
         if (error) {
             *error = QStringLiteral("rknn_inputs_set_failed_%1").arg(ret);
@@ -200,7 +273,9 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
         return {};
     }
 
+    stageTimer.restart();
     ret = rknn_run(runtime->appCtx.rknn_ctx, nullptr);
+    poseTimingSample.rknnRunMs = stageTimer.elapsed();
     if (ret < 0) {
         if (error) {
             *error = QStringLiteral("rknn_run_failed_%1").arg(ret);
@@ -215,7 +290,9 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
         outputs[i].want_float = !runtime->appCtx.is_quant;
     }
 
+    stageTimer.restart();
     ret = rknn_outputs_get(runtime->appCtx.rknn_ctx, runtime->appCtx.io_num.n_output, outputs.data(), nullptr);
+    poseTimingSample.outputsGetMs = stageTimer.elapsed();
     if (ret < 0) {
         if (error) {
             *error = QStringLiteral("rknn_outputs_get_failed_%1").arg(ret);
@@ -224,14 +301,16 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
     }
 
     letterbox_t letterBox;
-    letterBox.x_pad = xPad;
-    letterBox.y_pad = yPad;
-    letterBox.scale = static_cast<float>(scale);
+    letterBox.x_pad = preprocessed.xPad;
+    letterBox.y_pad = preprocessed.yPad;
+    letterBox.scale = preprocessed.scale;
 
     object_detect_result_list results;
     memset(&results, 0, sizeof(results));
+    stageTimer.restart();
     post_process(&runtime->appCtx, outputs.data(), &letterBox, BOX_THRESH, NMS_THRESH, &results);
     rknn_outputs_release(runtime->appCtx.rknn_ctx, runtime->appCtx.io_num.n_output, outputs.data());
+    poseTimingSample.postProcessMs = stageTimer.elapsed();
 
     QVector<PosePerson> people;
     for (int i = 0; i < results.count; ++i) {
@@ -250,6 +329,10 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
         }
         people.push_back(person);
     }
+
+    poseTimingSample.totalMs = totalTimer.elapsed();
+    poseTimingSample.peopleCount = people.size();
+    poseTimingLogger.appendSample(frame, poseTimingSample);
 
     if (error) {
         error->clear();

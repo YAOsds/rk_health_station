@@ -1,11 +1,12 @@
 #pragma once
 
+#include "analysis/analysis_frame_source.h"
 #include "models/fall_models.h"
 #include "models/video_models.h"
 
 #include <QString>
 
-class AnalysisOutputBackend {
+class AnalysisOutputBackend : public AnalysisFrameSource {
 public:
     virtual ~AnalysisOutputBackend() = default;
 

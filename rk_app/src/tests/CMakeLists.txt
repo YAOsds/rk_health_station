@@ -59,6 +59,21 @@ target_link_libraries(analysis_stream_protocol_test PRIVATE
 
 add_test(NAME analysis_stream_protocol_test COMMAND analysis_stream_protocol_test)
 
+add_executable(analysis_frame_descriptor_protocol_test
+    protocol_tests/analysis_frame_descriptor_protocol_test.cpp
+)
+
+set_target_properties(analysis_frame_descriptor_protocol_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(analysis_frame_descriptor_protocol_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME analysis_frame_descriptor_protocol_test COMMAND analysis_frame_descriptor_protocol_test)
+
 add_executable(latency_marker_writer_test
     protocol_tests/latency_marker_writer_test.cpp
 )

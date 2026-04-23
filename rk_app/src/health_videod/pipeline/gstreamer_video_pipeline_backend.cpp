@@ -1,5 +1,6 @@
 #include "pipeline/gstreamer_video_pipeline_backend.h"
 
+#include "debug/latency_marker_writer.h"
 #include "analysis/shared_memory_frame_ring.h"
 
 #include <QDateTime>
@@ -16,6 +17,7 @@ const int kAnalysisOutputWidth = 640;
 const int kAnalysisOutputHeight = 640;
 const char kGstLaunchEnvVar[] = "RK_VIDEO_GST_LAUNCH_BIN";
 const char kDefaultGstLaunchBinary[] = "gst-launch-1.0";
+const char kVideoLatencyMarkerEnvVar[] = "RK_VIDEO_LATENCY_MARKER_PATH";
 }
 
 GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend() = default;
@@ -265,6 +267,17 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
             descriptor.sequence = publish.sequence;
             descriptor.payloadBytes = publish.payloadBytes;
             analysisFrameSource_->publishDescriptor(descriptor);
+
+            LatencyMarkerWriter marker(qEnvironmentVariable(kVideoLatencyMarkerEnvVar));
+            marker.writeEvent(QStringLiteral("analysis_descriptor_published"), packet.timestampMs,
+                QJsonObject{
+                    {QStringLiteral("camera_id"), packet.cameraId},
+                    {QStringLiteral("frame_id"), QString::number(packet.frameId)},
+                    {QStringLiteral("slot_index"), static_cast<int>(descriptor.slotIndex)},
+                    {QStringLiteral("sequence"), QString::number(descriptor.sequence)},
+                    {QStringLiteral("dropped_frames"),
+                        static_cast<double>(pipeline.frameRing->droppedFrames())},
+                });
         }
     }
 }

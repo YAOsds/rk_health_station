@@ -115,6 +115,10 @@ SharedFramePublishResult SharedMemoryFrameRingWriter::publish(const AnalysisFram
     return result;
 }
 
+quint64 SharedMemoryFrameRingWriter::droppedFrames() const {
+    return header_ ? header_->droppedFrames : 0;
+}
+
 SharedFrameSlotHeader *SharedMemoryFrameRingWriter::slotHeaderFor(quint32 slotIndex) const {
     char *base = static_cast<char *>(mapped_) + sizeof(SharedFrameRingHeader)
         + static_cast<qsizetype>(header_->slotStride) * slotIndex;

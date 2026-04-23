@@ -41,6 +41,7 @@ public:
 
     bool initialize(QString *error = nullptr);
     SharedFramePublishResult publish(const AnalysisFramePacket &frame);
+    quint64 droppedFrames() const;
 
 private:
     SharedFrameSlotHeader *slotHeaderFor(quint32 slotIndex) const;

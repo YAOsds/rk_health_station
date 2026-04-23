@@ -1,12 +1,15 @@
 #include "ingest/analysis_stream_client.h"
 
+#include "debug/latency_marker_writer.h"
 #include "protocol/analysis_frame_descriptor_protocol.h"
 
+#include <QDateTime>
 #include <QLocalSocket>
 #include <QTimer>
 
 namespace {
 constexpr int kReconnectDelayMs = 300;
+const char kFallLatencyMarkerEnvVar[] = "RK_FALL_LATENCY_MARKER_PATH";
 }
 
 AnalysisStreamClient::AnalysisStreamClient(
@@ -86,6 +89,13 @@ void AnalysisStreamClient::onReadyRead() {
         if (!reader_.read(descriptor, &packet, &error)) {
             continue;
         }
+        LatencyMarkerWriter marker(qEnvironmentVariable(kFallLatencyMarkerEnvVar));
+        marker.writeEvent(QStringLiteral("analysis_descriptor_ingested"),
+            QDateTime::currentMSecsSinceEpoch(),
+            QJsonObject{
+                {QStringLiteral("camera_id"), packet.cameraId},
+                {QStringLiteral("frame_id"), QString::number(packet.frameId)},
+            });
         latestPacket = packet;
         hasPacket = true;
     }

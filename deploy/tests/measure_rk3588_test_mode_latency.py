@@ -9,19 +9,51 @@ import tempfile
 import time
 
 
-def compute_metrics(video_events, fall_events):
-    playback = next(event for event in video_events if event["event"] == "playback_started")
-    first_frame = next(event for event in fall_events if event["event"] == "first_analysis_frame")
-    first_classification = next(
-        event for event in fall_events if event["event"] == "first_classification"
-    )
+def _first_event(events, name):
+    return next((event for event in events if event["event"] == name), None)
+
+
+def _as_int(value, default=0):
+    if value is None:
+        return default
+    return int(value)
+
+
+def compare_runs(baseline, candidate):
+    return {
+        "transport_latency_delta_ms": candidate["transport_latency_ms"]
+        - baseline["transport_latency_ms"],
+        "producer_cpu_delta_pct": candidate["producer_cpu_pct"]
+        - baseline["producer_cpu_pct"],
+        "consumer_cpu_delta_pct": candidate["consumer_cpu_pct"]
+        - baseline["consumer_cpu_pct"],
+        "producer_drop_delta": candidate["producer_dropped_frames"]
+        - baseline["producer_dropped_frames"],
+    }
+
+
+def compute_metrics(video_events, fall_events, system_metrics=None):
+    system_metrics = system_metrics or {}
+    playback = _first_event(video_events, "playback_started")
+    published = _first_event(video_events, "analysis_descriptor_published")
+    ingested = _first_event(fall_events, "analysis_descriptor_ingested")
+    first_frame = _first_event(fall_events, "first_analysis_frame")
+    first_classification = _first_event(fall_events, "first_classification")
     return {
         "playback_start_ts_ms": playback["ts_ms"],
+        "analysis_publish_ts_ms": published["ts_ms"] if published else None,
+        "analysis_ingest_ts_ms": ingested["ts_ms"] if ingested else None,
         "first_frame_ts_ms": first_frame["ts_ms"],
         "first_classification_ts_ms": first_classification["ts_ms"],
+        "transport_latency_ms": (ingested["ts_ms"] - published["ts_ms"])
+        if published and ingested
+        else None,
         "analysis_ingress_latency_ms": first_frame["ts_ms"] - playback["ts_ms"],
         "classification_stage_latency_ms": first_classification["ts_ms"] - first_frame["ts_ms"],
         "startup_classification_latency_ms": first_classification["ts_ms"] - playback["ts_ms"],
+        "producer_dropped_frames": _as_int(published.get("dropped_frames", 0)) if published else 0,
+        "producer_cpu_pct": float(system_metrics.get("producer_cpu_pct", 0.0)),
+        "consumer_cpu_pct": float(system_metrics.get("consumer_cpu_pct", 0.0)),
         "first_state": first_classification.get("state", ""),
     }
 
@@ -85,6 +117,26 @@ def fetch_remote_events(host, password, video_marker, fall_marker):
     return json.loads(result.stdout.strip() or "{}")
 
 
+def fetch_remote_cpu_metrics(host, password):
+    remote_cmd = (
+        "python3 - <<'PY'\n"
+        "import json\n"
+        "import subprocess\n"
+        "\n"
+        "def cpu(name):\n"
+        "    result = subprocess.run(['ps', '-C', name, '-o', '%cpu='], capture_output=True, text=True)\n"
+        "    if result.returncode != 0:\n"
+        "        return 0.0\n"
+        "    values = [float(line.strip()) for line in result.stdout.splitlines() if line.strip()]\n"
+        "    return sum(values)\n"
+        "\n"
+        "print(json.dumps({'producer_cpu_pct': cpu('health-videod'), 'consumer_cpu_pct': cpu('health-falld')}))\n"
+        "PY"
+    )
+    result = run_ssh(host, password, remote_cmd)
+    return json.loads(result.stdout.strip() or "{}")
+
+
 def start_bundle(host, password, bundle_dir, video_marker, fall_marker):
     remote_cmd = (
         f"cd {shlex.quote(bundle_dir)} && "
@@ -142,7 +194,14 @@ def main():
             video_events = events.get("video_events", [])
             fall_events = events.get("fall_events", [])
             if any(event.get("event") == "first_classification" for event in fall_events):
-                print(json.dumps(compute_metrics(video_events, fall_events), indent=2, sort_keys=True))
+                cpu_metrics = fetch_remote_cpu_metrics(args.host, args.password)
+                print(
+                    json.dumps(
+                        compute_metrics(video_events, fall_events, cpu_metrics),
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
                 return
             time.sleep(0.2)
         raise SystemExit("timed out waiting for first_classification marker")

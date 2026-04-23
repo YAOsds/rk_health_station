@@ -72,15 +72,17 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
             QString error;
             runtimeStatus_.lastFrameTs = QDateTime::currentMSecsSinceEpoch();
             if (latencyMarkerWriter_ && !firstFrameMarkerWritten_) {
+                const QString pixelFormat = frame.pixelFormat == AnalysisPixelFormat::Nv12
+                    ? QStringLiteral("nv12")
+                    : (frame.pixelFormat == AnalysisPixelFormat::Rgb
+                        ? QStringLiteral("rgb")
+                        : QStringLiteral("jpeg"));
                 latencyMarkerWriter_->writeEvent(
                     QStringLiteral("first_analysis_frame"), runtimeStatus_.lastFrameTs,
                     QJsonObject{
                         {QStringLiteral("camera_id"), frame.cameraId},
                         {QStringLiteral("frame_id"), QString::number(frame.frameId)},
-                        {QStringLiteral("pixel_format"),
-                            frame.pixelFormat == AnalysisPixelFormat::Nv12
-                                ? QStringLiteral("nv12")
-                                : QStringLiteral("jpeg")},
+                        {QStringLiteral("pixel_format"), pixelFormat},
                     });
                 firstFrameMarkerWritten_ = true;
             }

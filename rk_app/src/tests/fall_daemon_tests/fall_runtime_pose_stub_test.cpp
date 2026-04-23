@@ -31,6 +31,7 @@ class FallRuntimePoseStubTest : public QObject {
 
 private slots:
     void estimatorInterfaceReturnsSinglePose();
+    void estimatorInterfaceAcceptsRgbPackets();
 };
 
 void FallRuntimePoseStubTest::estimatorInterfaceReturnsSinglePose() {
@@ -42,6 +43,22 @@ void FallRuntimePoseStubTest::estimatorInterfaceReturnsSinglePose() {
     frame.width = 640;
     frame.height = 640;
     const QVector<PosePerson> result = estimator.infer(frame, &error);
+    QCOMPARE(result.size(), 1);
+    QCOMPARE(result.first().keypoints.size(), 17);
+}
+
+void FallRuntimePoseStubTest::estimatorInterfaceAcceptsRgbPackets() {
+    FakePoseEstimator estimator;
+    QString error;
+
+    AnalysisFramePacket frame;
+    frame.width = 640;
+    frame.height = 640;
+    frame.pixelFormat = AnalysisPixelFormat::Rgb;
+    frame.payload = QByteArray(640 * 640 * 3, '\x11');
+
+    const QVector<PosePerson> result = estimator.infer(frame, &error);
+    QVERIFY(error.isEmpty());
     QCOMPARE(result.size(), 1);
     QCOMPARE(result.first().keypoints.size(), 17);
 }

@@ -6,6 +6,43 @@ namespace {
 constexpr quint32 kAnalysisFrameMagic = 0x524B4146; // RKAF
 constexpr quint16 kAnalysisFrameVersion = 1;
 
+bool isKnownPixelFormat(qint32 value) {
+    switch (static_cast<AnalysisPixelFormat>(value)) {
+    case AnalysisPixelFormat::Jpeg:
+    case AnalysisPixelFormat::Nv12:
+    case AnalysisPixelFormat::Rgb:
+        return true;
+    }
+    return false;
+}
+
+bool hasValidPayloadShape(const AnalysisFramePacket &packet) {
+    if (packet.width < 0 || packet.height < 0) {
+        return false;
+    }
+
+    switch (packet.pixelFormat) {
+    case AnalysisPixelFormat::Jpeg:
+        return !packet.payload.isEmpty();
+    case AnalysisPixelFormat::Nv12: {
+        if (packet.width <= 0 || packet.height <= 0) {
+            return false;
+        }
+        const qint64 expectedSize = static_cast<qint64>(packet.width) * packet.height * 3 / 2;
+        return expectedSize > 0 && packet.payload.size() == expectedSize;
+    }
+    case AnalysisPixelFormat::Rgb: {
+        if (packet.width <= 0 || packet.height <= 0) {
+            return false;
+        }
+        const qint64 expectedSize = static_cast<qint64>(packet.width) * packet.height * 3;
+        return expectedSize > 0 && packet.payload.size() == expectedSize;
+    }
+    }
+
+    return false;
+}
+
 QByteArray encodeAnalysisFramePayload(const AnalysisFramePacket &packet) {
     QByteArray payload;
     QDataStream stream(&payload, QIODevice::WriteOnly);
@@ -49,8 +86,12 @@ bool decodeAnalysisFramePayload(const QByteArray &payload, AnalysisFramePacket *
         return false;
     }
 
+    if (!isKnownPixelFormat(pixelFormatValue)) {
+        return false;
+    }
+
     packet->pixelFormat = static_cast<AnalysisPixelFormat>(pixelFormatValue);
-    return true;
+    return hasValidPayloadShape(*packet);
 }
 }
 

@@ -8,7 +8,6 @@
 
 class QLocalServer;
 class QLocalSocket;
-class QTcpSocket;
 
 class GstreamerAnalysisOutputBackend : public QObject, public AnalysisOutputBackend {
     Q_OBJECT
@@ -21,25 +20,18 @@ public:
     bool start(const VideoChannelStatus &status, QString *error) override;
     bool stop(const QString &cameraId, QString *error) override;
     AnalysisChannelStatus statusForCamera(const QString &cameraId) const override;
+    bool acceptsFrames(const QString &cameraId) const override;
+    void publishFrame(const AnalysisFramePacket &packet) override;
 
 private:
-    bool configurePreviewSource(const QString &previewUrl, QString *error);
     void ensureLocalServer(QString *error);
     void onNewLocalConnection();
-    void onPreviewReadyRead();
-    void processPreviewChunk(const QByteArray &chunk);
-    void broadcastFrame(const QByteArray &jpegBytes);
-    void setStreamConnected(bool connected);
+    void updateClientState();
     AnalysisChannelStatus defaultStatusForCamera(const QString &cameraId) const;
+    QString pixelFormatName(AnalysisPixelFormat pixelFormat) const;
 
     QHash<QString, AnalysisChannelStatus> statuses_;
     QList<QLocalSocket *> clients_;
     QLocalServer *localServer_ = nullptr;
-    QTcpSocket *previewSocket_ = nullptr;
-    QByteArray previewBuffer_;
-    QByteArray boundaryMarker_;
-    QString previewHost_;
     QString activeCameraId_;
-    quint16 previewPort_ = 0;
-    quint64 nextFrameId_ = 1;
 };

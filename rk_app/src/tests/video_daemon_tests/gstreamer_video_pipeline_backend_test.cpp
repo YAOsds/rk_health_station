@@ -4,6 +4,20 @@
 #include <QTemporaryDir>
 #include <QtTest/QTest>
 
+class RecordingAnalysisFrameSource : public AnalysisFrameSource {
+public:
+    bool acceptsFrames(const QString &cameraId) const override {
+        return enabled && cameraId == QStringLiteral("front_cam");
+    }
+
+    void publishFrame(const AnalysisFramePacket &packet) override {
+        packets.append(packet);
+    }
+
+    bool enabled = true;
+    QVector<AnalysisFramePacket> packets;
+};
+
 class GstreamerVideoPipelineBackendTest : public QObject {
     Q_OBJECT
 
@@ -11,6 +25,8 @@ private slots:
     void rejectsPipelineThatExitsDuringPreviewStartup();
     void returnsTcpMjpegPreviewUrlForRunningPreview();
     void usesGenericFileDecodePipelineForTestInput();
+    void forwardsRgbFramesToAnalysisSource();
+    void capsAnalysisTapRateAtStableBaselineFps();
 };
 
 void GstreamerVideoPipelineBackendTest::rejectsPipelineThatExitsDuringPreviewStartup() {
@@ -130,6 +146,103 @@ void GstreamerVideoPipelineBackendTest::usesGenericFileDecodePipelineForTestInpu
     QVERIFY(arguments.contains(QStringLiteral("name=dec")));
     QVERIFY(arguments.contains(QStringLiteral("audioconvert")));
     QVERIFY(!arguments.contains(QStringLiteral("qtdemux")));
+
+    qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
+}
+
+void GstreamerVideoPipelineBackendTest::forwardsRgbFramesToAnalysisSource() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString launcherPath = tempDir.filePath(QStringLiteral("fake-gst-launch.sh"));
+    QFile launcher(launcherPath);
+    QVERIFY(launcher.open(QIODevice::WriteOnly | QIODevice::Text));
+    launcher.write(
+        "#!/bin/sh\n"
+        "dd if=/dev/zero bs=1228800 count=1 2>/dev/null\n"
+        "sleep 2\n");
+    launcher.close();
+    QVERIFY(QFile::setPermissions(launcherPath,
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+    qputenv("RK_VIDEO_GST_LAUNCH_BIN", launcherPath.toUtf8());
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.previewProfile.width = 4;
+    status.previewProfile.height = 2;
+    status.previewProfile.fps = 30;
+    status.previewProfile.pixelFormat = QStringLiteral("NV12");
+
+    RecordingAnalysisFrameSource analysisSource;
+    GstreamerVideoPipelineBackend backend;
+    backend.setAnalysisFrameSource(&analysisSource);
+
+    QString previewUrl;
+    QString error;
+    QVERIFY(backend.startPreview(status, &previewUrl, &error));
+    QTRY_COMPARE_WITH_TIMEOUT(analysisSource.packets.size(), 1, 2000);
+    QCOMPARE(analysisSource.packets.first().cameraId, QStringLiteral("front_cam"));
+    QCOMPARE(analysisSource.packets.first().width, 640);
+    QCOMPARE(analysisSource.packets.first().height, 640);
+    QCOMPARE(analysisSource.packets.first().pixelFormat, AnalysisPixelFormat::Rgb);
+    QCOMPARE(analysisSource.packets.first().payload.size(), 640 * 640 * 3);
+
+    qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
+}
+
+void GstreamerVideoPipelineBackendTest::capsAnalysisTapRateAtStableBaselineFps() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString capturePath = tempDir.filePath(QStringLiteral("launcher-args.txt"));
+    const QString launcherPath = tempDir.filePath(QStringLiteral("fake-gst-launch.sh"));
+    QFile launcher(launcherPath);
+    QVERIFY(launcher.open(QIODevice::WriteOnly | QIODevice::Text));
+    launcher.write(QStringLiteral(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$@\" > '%1'\n"
+        "sleep 2\n")
+            .arg(capturePath)
+            .toUtf8());
+    launcher.close();
+    QVERIFY(QFile::setPermissions(launcherPath,
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+    qputenv("RK_VIDEO_GST_LAUNCH_BIN", launcherPath.toUtf8());
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    status.previewProfile.fps = 30;
+    status.previewProfile.pixelFormat = QStringLiteral("NV12");
+
+    RecordingAnalysisFrameSource analysisSource;
+    GstreamerVideoPipelineBackend backend;
+    backend.setAnalysisFrameSource(&analysisSource);
+
+    QString previewUrl;
+    QString error;
+    QVERIFY(backend.startPreview(status, &previewUrl, &error));
+    QVERIFY(QFile::exists(capturePath));
+
+    QFile captured(capturePath);
+    QVERIFY(captured.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString arguments = QString::fromUtf8(captured.readAll());
+    QVERIFY(arguments.contains(QStringLiteral("videoconvert")));
+    QVERIFY(arguments.contains(QStringLiteral("videoscale")));
+    QVERIFY(arguments.contains(QStringLiteral("video/x-raw,format=RGB")));
+    QVERIFY(arguments.contains(QStringLiteral("jpegenc")));
+    QVERIFY(arguments.contains(QStringLiteral("multipartmux")));
+    QVERIFY(arguments.contains(QStringLiteral("videorate")));
+    QVERIFY(arguments.contains(QStringLiteral("drop-only=true")));
+    QVERIFY(arguments.contains(QStringLiteral("fdsink")));
+    QVERIFY(arguments.contains(QStringLiteral("fd=1")));
+    QVERIFY(arguments.contains(QStringLiteral("framerate=15/1")));
+    QVERIFY(!arguments.contains(QStringLiteral("framerate=10/1")));
 
     qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
 }

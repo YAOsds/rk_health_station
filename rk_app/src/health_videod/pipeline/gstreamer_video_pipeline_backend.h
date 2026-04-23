@@ -2,6 +2,7 @@
 
 #include "pipeline/video_pipeline_backend.h"
 
+#include <QByteArray>
 #include <QHash>
 #include <QString>
 
@@ -13,6 +14,7 @@ public:
     ~GstreamerVideoPipelineBackend() override;
 
     void setObserver(VideoPipelineObserver *observer) override;
+    void setAnalysisFrameSource(AnalysisFrameSource *source) override;
     bool startPreview(const VideoChannelStatus &status, QString *previewUrl, QString *error) override;
     bool stopPreview(const QString &cameraId, QString *error) override;
     bool captureSnapshot(const VideoChannelStatus &status, const QString &outputPath, QString *error) override;
@@ -25,6 +27,12 @@ private:
         bool recording = false;
         bool testInput = false;
         QString previewUrl;
+        QString cameraId;
+        int analysisWidth = 0;
+        int analysisHeight = 0;
+        int analysisFrameBytes = 0;
+        quint64 nextFrameId = 1;
+        QByteArray stdoutBuffer;
     };
 
     QString gstLaunchBinary() const;
@@ -35,12 +43,16 @@ private:
     QString buildPreviewCommand(const VideoChannelStatus &status) const;
     QString buildRecordingCommand(const VideoChannelStatus &status, const QString &outputPath) const;
     QString buildSnapshotCommand(const VideoChannelStatus &status, const QString &outputPath) const;
+    QString buildAnalysisTapCommandFragment(const VideoChannelStatus &status) const;
+    bool analysisTapEnabled(const VideoChannelStatus &status) const;
+    void processAnalysisStdout(const QString &cameraId);
     bool startCommand(const QString &cameraId, const QString &command, bool recording,
-        QString *previewUrl, QString *error);
+        QString *previewUrl, QString *error, int analysisWidth = 0, int analysisHeight = 0);
     bool runOneShotCommand(const QString &command, QString *error) const;
     bool stopActivePipeline(const QString &cameraId, QString *error);
     void stopAllPipelines();
 
     QHash<QString, ActivePipeline> pipelines_;
     VideoPipelineObserver *observer_ = nullptr;
+    AnalysisFrameSource *analysisFrameSource_ = nullptr;
 };

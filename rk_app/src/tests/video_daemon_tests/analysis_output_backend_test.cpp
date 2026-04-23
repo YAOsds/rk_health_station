@@ -12,7 +12,7 @@ class AnalysisOutputBackendTest : public QObject {
 
 private slots:
     void resolvesAnalysisSocketFromEnvironment();
-    void forwardsPreviewFrameToLocalSocket();
+    void publishesPushedRgbFrameToLocalSocket();
 };
 
 void AnalysisOutputBackendTest::resolvesAnalysisSocketFromEnvironment() {
@@ -22,44 +22,54 @@ void AnalysisOutputBackendTest::resolvesAnalysisSocketFromEnvironment() {
     qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");
 }
 
-void AnalysisOutputBackendTest::forwardsPreviewFrameToLocalSocket() {
+void AnalysisOutputBackendTest::publishesPushedRgbFrameToLocalSocket() {
     qputenv("RK_VIDEO_ANALYSIS_SOCKET_PATH", QByteArray("/tmp/rk_video_analysis_backend_test.sock"));
-
-    QTcpServer previewServer;
-    QVERIFY(previewServer.listen(QHostAddress::LocalHost));
 
     GstreamerAnalysisOutputBackend backend;
     VideoChannelStatus status;
     status.cameraId = QStringLiteral("front_cam");
-    status.previewUrl = QStringLiteral("tcp://127.0.0.1:%1?transport=tcp_mjpeg&boundary=rkpreview")
-                            .arg(previewServer.serverPort());
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    status.previewProfile.fps = 20;
 
     QString error;
     QVERIFY(backend.start(status, &error));
     QVERIFY(error.isEmpty());
+    QVERIFY(backend.acceptsFrames(QStringLiteral("front_cam")));
 
-    QVERIFY(previewServer.waitForNewConnection(2000));
-    QTcpSocket *previewSocket = previewServer.nextPendingConnection();
-    QVERIFY(previewSocket != nullptr);
+    const AnalysisChannelStatus startedStatus = backend.statusForCamera(QStringLiteral("front_cam"));
+    QCOMPARE(startedStatus.outputFormat, QStringLiteral("rgb"));
+    QCOMPARE(startedStatus.width, 640);
+    QCOMPARE(startedStatus.height, 640);
 
     QLocalSocket client;
     client.connectToServer(QStringLiteral("/tmp/rk_video_analysis_backend_test.sock"));
     QVERIFY(client.waitForConnected(2000));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        backend.statusForCamera(QStringLiteral("front_cam")).streamConnected, 2000);
 
-    QByteArray multipart;
-    multipart += "--rkpreview\r\n";
-    multipart += "Content-Type: image/jpeg\r\n";
-    multipart += "Content-Length: 10\r\n\r\n";
-    multipart += "jpeg-bytes";
-    multipart += "\r\n";
-    previewSocket->write(multipart);
-    previewSocket->flush();
+    AnalysisFramePacket pushed;
+    pushed.frameId = 5;
+    pushed.timestampMs = 1234;
+    pushed.cameraId = QStringLiteral("front_cam");
+    pushed.width = 4;
+    pushed.height = 3;
+    pushed.pixelFormat = AnalysisPixelFormat::Rgb;
+    pushed.payload = QByteArray(4 * 3 * 3, '\x44');
+    const QByteArray expectedEncoded = encodeAnalysisFramePacket(pushed);
+    backend.publishFrame(pushed);
 
-    QTRY_VERIFY_WITH_TIMEOUT(client.bytesAvailable() > 0 || client.waitForReadyRead(50), 2000);
+    QTRY_VERIFY_WITH_TIMEOUT(client.bytesAvailable() >= expectedEncoded.size(), 2000);
     AnalysisFramePacket packet;
     QVERIFY(decodeAnalysisFramePacket(client.readAll(), &packet));
     QCOMPARE(packet.cameraId, QStringLiteral("front_cam"));
-    QCOMPARE(packet.payload, QByteArray("jpeg-bytes"));
+    QCOMPARE(packet.pixelFormat, AnalysisPixelFormat::Rgb);
+    QCOMPARE(packet.payload, pushed.payload);
+
+    const AnalysisChannelStatus analysisStatus = backend.statusForCamera(QStringLiteral("front_cam"));
+    QCOMPARE(analysisStatus.outputFormat, QStringLiteral("rgb"));
+    QCOMPARE(analysisStatus.width, 4);
+    QCOMPARE(analysisStatus.height, 3);
 
     backend.stop(QStringLiteral("front_cam"), &error);
     qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");

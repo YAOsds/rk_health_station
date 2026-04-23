@@ -11,6 +11,7 @@ else()
 endif()
 
 add_library(rk_shared STATIC
+    debug/latency_marker_writer.cpp
     protocol/device_frame.cpp
     protocol/ipc_message.cpp
     protocol/analysis_stream_protocol.cpp

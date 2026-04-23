@@ -15,6 +15,7 @@ const int kStartupProbeMs = 750;
 const int kStableAnalysisTapFps = 15;
 const int kAnalysisOutputWidth = 640;
 const int kAnalysisOutputHeight = 640;
+const quint16 kAnalysisRingSlotCount = 32;
 const char kGstLaunchEnvVar[] = "RK_VIDEO_GST_LAUNCH_BIN";
 const char kDefaultGstLaunchBinary[] = "gst-launch-1.0";
 const char kVideoLatencyMarkerEnvVar[] = "RK_VIDEO_LATENCY_MARKER_PATH";
@@ -359,7 +360,7 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
         : 0;
     if (pipeline.analysisFrameBytes > 0) {
         pipeline.frameRing = new SharedMemoryFrameRingWriter(
-            cameraId, 4, static_cast<quint32>(pipeline.analysisFrameBytes));
+            cameraId, kAnalysisRingSlotCount, static_cast<quint32>(pipeline.analysisFrameBytes));
         QString ringError;
         if (!pipeline.frameRing->initialize(&ringError)) {
             if (error) {

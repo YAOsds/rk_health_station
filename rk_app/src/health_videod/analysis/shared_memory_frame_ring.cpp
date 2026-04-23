@@ -1,7 +1,5 @@
 #include "analysis/shared_memory_frame_ring.h"
 
-#include <QByteArray>
-
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -10,11 +8,6 @@
 
 namespace {
 constexpr mode_t kSharedMemoryMode = 0600;
-}
-
-QString sharedMemoryNameForCamera(const QString &cameraId) {
-    const QByteArray encoded = cameraId.toUtf8().toHex();
-    return QStringLiteral("/rk_video_analysis_%1").arg(QString::fromLatin1(encoded));
 }
 
 SharedMemoryFrameRingWriter::SharedMemoryFrameRingWriter(

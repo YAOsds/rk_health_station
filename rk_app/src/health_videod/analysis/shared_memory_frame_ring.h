@@ -2,6 +2,7 @@
 
 #include "models/fall_models.h"
 
+#include <QByteArray>
 #include <QString>
 
 struct SharedFrameRingHeader {
@@ -32,7 +33,10 @@ struct SharedFramePublishResult {
     quint32 payloadBytes = 0;
 };
 
-QString sharedMemoryNameForCamera(const QString &cameraId);
+inline QString sharedMemoryNameForCamera(const QString &cameraId) {
+    const QByteArray encoded = cameraId.toUtf8().toHex();
+    return QStringLiteral("/rk_video_analysis_%1").arg(QString::fromLatin1(encoded));
+}
 
 class SharedMemoryFrameRingWriter {
 public:

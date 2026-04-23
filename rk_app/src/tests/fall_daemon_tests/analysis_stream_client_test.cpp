@@ -32,7 +32,7 @@ class AnalysisStreamClientTest : public QObject {
 private slots:
     void decodesIncomingFramePackets();
     void decodesRgbFramePackets();
-    void keepsLatestPacketFromSingleReadBurst();
+    void emitsEveryPacketFromSingleReadBurst();
     void reconnectsAfterServerRestarts();
     void clearsPartialPacketBufferBeforeReconnect();
 };
@@ -101,7 +101,7 @@ void AnalysisStreamClientTest::decodesRgbFramePackets() {
     QCOMPARE(decoded.payload, packet.payload);
 }
 
-void AnalysisStreamClientTest::keepsLatestPacketFromSingleReadBurst() {
+void AnalysisStreamClientTest::emitsEveryPacketFromSingleReadBurst() {
     QLocalServer server;
     QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_test2.sock"));
     QVERIFY(server.listen(QStringLiteral("/tmp/rk_video_analysis_test2.sock")));
@@ -138,10 +138,14 @@ void AnalysisStreamClientTest::keepsLatestPacketFromSingleReadBurst() {
         + encodeAnalysisFrameDescriptor(publishPacketDescriptor(&writer, second)));
     socket->flush();
 
-    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 2000);
-    const AnalysisFramePacket lastDelivered = qvariant_cast<AnalysisFramePacket>(spy.takeFirst().at(0));
-    QCOMPARE(lastDelivered.frameId, second.frameId);
-    QCOMPARE(lastDelivered.payload, second.payload);
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 2, 2000);
+    const AnalysisFramePacket firstDelivered = qvariant_cast<AnalysisFramePacket>(spy.takeFirst().at(0));
+    QCOMPARE(firstDelivered.frameId, first.frameId);
+    QCOMPARE(firstDelivered.payload, first.payload);
+
+    const AnalysisFramePacket secondDelivered = qvariant_cast<AnalysisFramePacket>(spy.takeFirst().at(0));
+    QCOMPARE(secondDelivered.frameId, second.frameId);
+    QCOMPARE(secondDelivered.payload, second.payload);
 }
 
 void AnalysisStreamClientTest::reconnectsAfterServerRestarts() {

@@ -91,7 +91,7 @@ QJsonObject waitForMessageType(QLocalSocket *socket, const QString &type, int ti
 void streamJpegAnalysisFrames(
     QLocalSocket *analysisSocket, quint64 firstFrameId, quint64 lastFrameId, int waitMs = 5) {
     QVERIFY(analysisSocket != nullptr);
-    static SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 4, 640 * 640 * 3);
+    static SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 32, 640 * 640 * 3);
     static bool writerReady = writer.initialize();
     QVERIFY(writerReady);
     for (quint64 frameId = firstFrameId; frameId <= lastFrameId; ++frameId) {

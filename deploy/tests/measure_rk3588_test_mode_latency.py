@@ -19,10 +19,17 @@ def _as_int(value, default=0):
     return int(value)
 
 
+def _delta_or_none(candidate, baseline):
+    if candidate is None or baseline is None:
+        return None
+    return candidate - baseline
+
+
 def compare_runs(baseline, candidate):
     return {
-        "transport_latency_delta_ms": candidate["transport_latency_ms"]
-        - baseline["transport_latency_ms"],
+        "transport_latency_delta_ms": _delta_or_none(
+            candidate["transport_latency_ms"], baseline["transport_latency_ms"]
+        ),
         "producer_cpu_delta_pct": candidate["producer_cpu_pct"]
         - baseline["producer_cpu_pct"],
         "consumer_cpu_delta_pct": candidate["consumer_cpu_pct"]

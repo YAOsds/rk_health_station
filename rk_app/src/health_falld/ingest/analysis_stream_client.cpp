@@ -81,8 +81,6 @@ void AnalysisStreamClient::onReadyRead() {
     readBuffer_.append(socket_->readAll());
 
     AnalysisFrameDescriptor descriptor;
-    AnalysisFramePacket latestPacket;
-    bool hasPacket = false;
     while (takeFirstAnalysisFrameDescriptor(&readBuffer_, &descriptor)) {
         AnalysisFramePacket packet;
         QString error;
@@ -96,11 +94,6 @@ void AnalysisStreamClient::onReadyRead() {
                 {QStringLiteral("camera_id"), packet.cameraId},
                 {QStringLiteral("frame_id"), QString::number(packet.frameId)},
             });
-        latestPacket = packet;
-        hasPacket = true;
-    }
-
-    if (hasPacket) {
-        emit frameReceived(latestPacket);
+        emit frameReceived(packet);
     }
 }

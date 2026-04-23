@@ -57,6 +57,27 @@ class MeasureRk3588TestModeLatencyTest(unittest.TestCase):
         self.assertEqual(comparison["consumer_cpu_delta_pct"], -3.0)
         self.assertEqual(comparison["producer_drop_delta"], -4)
 
+    def test_compare_runs_tolerates_missing_transport_metric(self):
+        comparison = compare_runs(
+            {
+                "transport_latency_ms": None,
+                "producer_cpu_pct": 22.0,
+                "consumer_cpu_pct": 18.0,
+                "producer_dropped_frames": 0,
+            },
+            {
+                "transport_latency_ms": 18,
+                "producer_cpu_pct": 17.0,
+                "consumer_cpu_pct": 15.0,
+                "producer_dropped_frames": 1,
+            },
+        )
+
+        self.assertIsNone(comparison["transport_latency_delta_ms"])
+        self.assertEqual(comparison["producer_cpu_delta_pct"], -5.0)
+        self.assertEqual(comparison["consumer_cpu_delta_pct"], -3.0)
+        self.assertEqual(comparison["producer_drop_delta"], 1)
+
     def test_computes_metrics_when_marker_numbers_are_strings(self):
         metrics = compute_metrics(
             video_events=[

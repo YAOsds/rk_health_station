@@ -40,17 +40,17 @@ public:
         return started && !stopped && cameraId == lastStartedCameraId;
     }
 
-    void publishFrame(const AnalysisFramePacket &packet) override {
-        publishedFrames += 1;
-        lastPublishedFrame = packet;
+    void publishDescriptor(const AnalysisFrameDescriptor &descriptor) override {
+        publishedDescriptors += 1;
+        lastPublishedDescriptor = descriptor;
     }
 
     bool started = false;
     bool stopped = false;
     QString lastStartedCameraId;
     QString lastStoppedCameraId;
-    int publishedFrames = 0;
-    AnalysisFramePacket lastPublishedFrame;
+    int publishedDescriptors = 0;
+    AnalysisFrameDescriptor lastPublishedDescriptor;
 };
 
 class FakeVideoPipelineBackend : public VideoPipelineBackend {

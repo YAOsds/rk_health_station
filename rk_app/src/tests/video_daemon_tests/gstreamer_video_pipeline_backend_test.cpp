@@ -10,12 +10,12 @@ public:
         return enabled && cameraId == QStringLiteral("front_cam");
     }
 
-    void publishFrame(const AnalysisFramePacket &packet) override {
-        packets.append(packet);
+    void publishDescriptor(const AnalysisFrameDescriptor &descriptor) override {
+        descriptors.append(descriptor);
     }
 
     bool enabled = true;
-    QVector<AnalysisFramePacket> packets;
+    QVector<AnalysisFrameDescriptor> descriptors;
 };
 
 class GstreamerVideoPipelineBackendTest : public QObject {
@@ -182,12 +182,12 @@ void GstreamerVideoPipelineBackendTest::forwardsRgbFramesToAnalysisSource() {
     QString previewUrl;
     QString error;
     QVERIFY(backend.startPreview(status, &previewUrl, &error));
-    QTRY_COMPARE_WITH_TIMEOUT(analysisSource.packets.size(), 1, 2000);
-    QCOMPARE(analysisSource.packets.first().cameraId, QStringLiteral("front_cam"));
-    QCOMPARE(analysisSource.packets.first().width, 640);
-    QCOMPARE(analysisSource.packets.first().height, 640);
-    QCOMPARE(analysisSource.packets.first().pixelFormat, AnalysisPixelFormat::Rgb);
-    QCOMPARE(analysisSource.packets.first().payload.size(), 640 * 640 * 3);
+    QTRY_COMPARE_WITH_TIMEOUT(analysisSource.descriptors.size(), 1, 2000);
+    QCOMPARE(analysisSource.descriptors.first().cameraId, QStringLiteral("front_cam"));
+    QCOMPARE(analysisSource.descriptors.first().width, 640);
+    QCOMPARE(analysisSource.descriptors.first().height, 640);
+    QCOMPARE(analysisSource.descriptors.first().pixelFormat, AnalysisPixelFormat::Rgb);
+    QCOMPARE(analysisSource.descriptors.first().payloadBytes, 640u * 640u * 3u);
 
     qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
 }

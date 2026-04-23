@@ -7,6 +7,7 @@
 #include <QString>
 
 class QProcess;
+class SharedMemoryFrameRingWriter;
 
 class GstreamerVideoPipelineBackend : public VideoPipelineBackend {
 public:
@@ -33,6 +34,7 @@ private:
         int analysisFrameBytes = 0;
         quint64 nextFrameId = 1;
         QByteArray stdoutBuffer;
+        SharedMemoryFrameRingWriter *frameRing = nullptr;
     };
 
     QString gstLaunchBinary() const;

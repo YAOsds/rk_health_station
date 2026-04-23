@@ -1,5 +1,5 @@
 #include "analysis/gstreamer_analysis_output_backend.h"
-#include "protocol/analysis_stream_protocol.h"
+#include "protocol/analysis_frame_descriptor_protocol.h"
 
 #include <QHostAddress>
 #include <QLocalSocket>
@@ -12,7 +12,7 @@ class AnalysisOutputBackendTest : public QObject {
 
 private slots:
     void resolvesAnalysisSocketFromEnvironment();
-    void publishesPushedRgbFrameToLocalSocket();
+    void publishesDescriptorToLocalSocket();
 };
 
 void AnalysisOutputBackendTest::resolvesAnalysisSocketFromEnvironment() {
@@ -22,7 +22,7 @@ void AnalysisOutputBackendTest::resolvesAnalysisSocketFromEnvironment() {
     qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");
 }
 
-void AnalysisOutputBackendTest::publishesPushedRgbFrameToLocalSocket() {
+void AnalysisOutputBackendTest::publishesDescriptorToLocalSocket() {
     qputenv("RK_VIDEO_ANALYSIS_SOCKET_PATH", QByteArray("/tmp/rk_video_analysis_backend_test.sock"));
 
     GstreamerAnalysisOutputBackend backend;
@@ -48,28 +48,31 @@ void AnalysisOutputBackendTest::publishesPushedRgbFrameToLocalSocket() {
     QTRY_VERIFY_WITH_TIMEOUT(
         backend.statusForCamera(QStringLiteral("front_cam")).streamConnected, 2000);
 
-    AnalysisFramePacket pushed;
+    AnalysisFrameDescriptor pushed;
     pushed.frameId = 5;
     pushed.timestampMs = 1234;
     pushed.cameraId = QStringLiteral("front_cam");
-    pushed.width = 4;
-    pushed.height = 3;
+    pushed.width = 640;
+    pushed.height = 640;
     pushed.pixelFormat = AnalysisPixelFormat::Rgb;
-    pushed.payload = QByteArray(4 * 3 * 3, '\x44');
-    const QByteArray expectedEncoded = encodeAnalysisFramePacket(pushed);
-    backend.publishFrame(pushed);
+    pushed.slotIndex = 1;
+    pushed.sequence = 4;
+    pushed.payloadBytes = 640 * 640 * 3;
+    const QByteArray expectedEncoded = encodeAnalysisFrameDescriptor(pushed);
+    backend.publishDescriptor(pushed);
 
     QTRY_VERIFY_WITH_TIMEOUT(client.bytesAvailable() >= expectedEncoded.size(), 2000);
-    AnalysisFramePacket packet;
-    QVERIFY(decodeAnalysisFramePacket(client.readAll(), &packet));
-    QCOMPARE(packet.cameraId, QStringLiteral("front_cam"));
-    QCOMPARE(packet.pixelFormat, AnalysisPixelFormat::Rgb);
-    QCOMPARE(packet.payload, pushed.payload);
+    AnalysisFrameDescriptor descriptor;
+    QVERIFY(decodeAnalysisFrameDescriptor(client.readAll(), &descriptor));
+    QCOMPARE(descriptor.cameraId, QStringLiteral("front_cam"));
+    QCOMPARE(descriptor.pixelFormat, AnalysisPixelFormat::Rgb);
+    QCOMPARE(descriptor.slotIndex, pushed.slotIndex);
+    QCOMPARE(descriptor.sequence, pushed.sequence);
 
     const AnalysisChannelStatus analysisStatus = backend.statusForCamera(QStringLiteral("front_cam"));
     QCOMPARE(analysisStatus.outputFormat, QStringLiteral("rgb"));
-    QCOMPARE(analysisStatus.width, 4);
-    QCOMPARE(analysisStatus.height, 3);
+    QCOMPARE(analysisStatus.width, 640);
+    QCOMPARE(analysisStatus.height, 640);
 
     backend.stop(QStringLiteral("front_cam"), &error);
     qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");

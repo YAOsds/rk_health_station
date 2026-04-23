@@ -1,5 +1,7 @@
 #include "pipeline/gstreamer_video_pipeline_backend.h"
 
+#include "analysis/shared_memory_frame_ring.h"
+
 #include <QDateTime>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -245,8 +247,24 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
         packet.payload = pipeline.stdoutBuffer.left(pipeline.analysisFrameBytes);
         pipeline.stdoutBuffer.remove(0, pipeline.analysisFrameBytes);
 
-        if (analysisFrameSource_ && analysisFrameSource_->acceptsFrames(packet.cameraId)) {
-            analysisFrameSource_->publishFrame(packet);
+        if (analysisFrameSource_ && analysisFrameSource_->acceptsFrames(packet.cameraId)
+            && pipeline.frameRing) {
+            const SharedFramePublishResult publish = pipeline.frameRing->publish(packet);
+            if (publish.sequence == 0) {
+                continue;
+            }
+
+            AnalysisFrameDescriptor descriptor;
+            descriptor.frameId = packet.frameId;
+            descriptor.timestampMs = packet.timestampMs;
+            descriptor.cameraId = packet.cameraId;
+            descriptor.width = packet.width;
+            descriptor.height = packet.height;
+            descriptor.pixelFormat = packet.pixelFormat;
+            descriptor.slotIndex = publish.slotIndex;
+            descriptor.sequence = publish.sequence;
+            descriptor.payloadBytes = publish.payloadBytes;
+            analysisFrameSource_->publishDescriptor(descriptor);
         }
     }
 }
@@ -278,6 +296,7 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
 
             const ActivePipeline pipeline = pipelines_.take(cameraId);
             const bool testInput = pipeline.testInput;
+            delete pipeline.frameRing;
             delete process;
 
             if (!observer_) {
@@ -325,6 +344,23 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
     pipeline.analysisFrameBytes = analysisWidth > 0 && analysisHeight > 0
         ? analysisWidth * analysisHeight * 3
         : 0;
+    if (pipeline.analysisFrameBytes > 0) {
+        pipeline.frameRing = new SharedMemoryFrameRingWriter(
+            cameraId, 4, static_cast<quint32>(pipeline.analysisFrameBytes));
+        QString ringError;
+        if (!pipeline.frameRing->initialize(&ringError)) {
+            if (error) {
+                *error = ringError.isEmpty()
+                    ? QStringLiteral("analysis_ring_init_failed")
+                    : ringError;
+            }
+            delete pipeline.frameRing;
+            process->kill();
+            process->waitForFinished(kStopTimeoutMs);
+            delete process;
+            return false;
+        }
+    }
     pipelines_.insert(cameraId, pipeline);
     processAnalysisStdout(cameraId);
 
@@ -387,6 +423,7 @@ bool GstreamerVideoPipelineBackend::stopActivePipeline(const QString &cameraId, 
     if (pipeline.process->state() != QProcess::NotRunning && error) {
         *error = QStringLiteral("pipeline_stop_failed");
     }
+    delete pipeline.frameRing;
     delete pipeline.process;
     return error ? error->isEmpty() : true;
 }

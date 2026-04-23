@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTemporaryDir>
 #include <QtTest/QTest>
 
 class FallEndToEndStatusTest : public QObject {
@@ -18,6 +19,7 @@ private slots:
     void reportsInputConnectedAfterAnalysisSocketConnects();
     void updatesInferTimestampAfterFrameArrives();
     void startsWithRuleBackendWhenConfiguredExplicitly();
+    void writesLatencyMarkersForFirstFrameAndFirstClassification();
     void streamsClassificationAfterWindowFills();
     void streamsClassificationBatchForSinglePerson();
     void streamsClassificationBatchForMultiplePeople();
@@ -83,6 +85,22 @@ QJsonObject waitForMessageType(QLocalSocket *socket, const QString &type, int ti
         }
     }
     return {};
+}
+
+void streamJpegAnalysisFrames(
+    QLocalSocket *analysisSocket, quint64 firstFrameId, quint64 lastFrameId, int waitMs = 5) {
+    QVERIFY(analysisSocket != nullptr);
+    for (quint64 frameId = firstFrameId; frameId <= lastFrameId; ++frameId) {
+        AnalysisFramePacket packet;
+        packet.frameId = frameId;
+        packet.cameraId = QStringLiteral("front_cam");
+        packet.width = 640;
+        packet.height = 640;
+        packet.payload = QByteArray("jpeg-bytes");
+        analysisSocket->write(encodeAnalysisFramePacket(packet));
+        analysisSocket->flush();
+        QTest::qWait(waitMs);
+    }
 }
 }
 
@@ -222,7 +240,7 @@ private:
 void FallEndToEndStatusTest::publishesMonitoringStateWhenStartedWithoutModels() {
     qputenv("RK_FALL_SOCKET_NAME", QByteArray("/tmp/rk_fall_e2e.sock"));
 
-    FallDaemonApp app;
+    FallDaemonApp app(std::make_unique<SinglePoseEstimator>());
     QVERIFY(app.start());
 
     QLocalSocket socket;
@@ -345,6 +363,38 @@ void FallEndToEndStatusTest::startsWithRuleBackendWhenConfiguredExplicitly() {
     qunsetenv("RK_FALL_ACTION_BACKEND");
 }
 
+void FallEndToEndStatusTest::writesLatencyMarkersForFirstFrameAndFirstClassification() {
+    qputenv("RK_VIDEO_ANALYSIS_SOCKET_PATH", QByteArray("/tmp/rk_video_analysis_latency.sock"));
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString markerPath = tempDir.filePath(QStringLiteral("fall-latency.jsonl"));
+    qputenv("RK_FALL_LATENCY_MARKER_PATH", markerPath.toUtf8());
+
+    QLocalServer analysisServer;
+    QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_latency.sock"));
+    QVERIFY(analysisServer.listen(QStringLiteral("/tmp/rk_video_analysis_latency.sock")));
+
+    FallDaemonApp app(std::make_unique<SinglePoseEstimator>());
+    QVERIFY(app.start());
+
+    QVERIFY(analysisServer.waitForNewConnection(2000));
+    QLocalSocket *analysisSocket = analysisServer.nextPendingConnection();
+    QVERIFY(analysisSocket != nullptr);
+
+    streamJpegAnalysisFrames(analysisSocket, 1, 45);
+
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(markerPath), 2000);
+    QFile marker(markerPath);
+    QVERIFY(marker.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QByteArray content = marker.readAll();
+    QVERIFY(content.contains("first_analysis_frame"));
+    QVERIFY(content.contains("first_classification"));
+
+    qunsetenv("RK_FALL_LATENCY_MARKER_PATH");
+    qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");
+}
+
 void FallEndToEndStatusTest::streamsClassificationAfterWindowFills() {
     QLocalServer analysisServer;
     QLocalServer::removeServer(QStringLiteral("/tmp/rk_video_analysis_e2e_stream.sock"));
@@ -366,16 +416,7 @@ void FallEndToEndStatusTest::streamsClassificationAfterWindowFills() {
     subscriber.flush();
     QTest::qWait(50);
 
-    for (quint64 frameId = 1; frameId <= 45; ++frameId) {
-        AnalysisFramePacket packet;
-        packet.frameId = frameId;
-        packet.cameraId = QStringLiteral("front_cam");
-        packet.width = 640;
-        packet.height = 640;
-        packet.payload = QByteArray("jpeg-bytes");
-        analysisSocket->write(encodeAnalysisFramePacket(packet));
-        analysisSocket->flush();
-    }
+    streamJpegAnalysisFrames(analysisSocket, 1, 45);
 
     const QJsonObject classificationMessage =
         waitForMessageType(&subscriber, QStringLiteral("classification"));
@@ -408,16 +449,7 @@ void FallEndToEndStatusTest::streamsClassificationBatchForSinglePerson() {
     subscriber.flush();
     QTest::qWait(50);
 
-    for (quint64 frameId = 1; frameId <= 45; ++frameId) {
-        AnalysisFramePacket packet;
-        packet.frameId = frameId;
-        packet.cameraId = QStringLiteral("front_cam");
-        packet.width = 640;
-        packet.height = 640;
-        packet.payload = QByteArray("jpeg-bytes");
-        analysisSocket->write(encodeAnalysisFramePacket(packet));
-        analysisSocket->flush();
-    }
+    streamJpegAnalysisFrames(analysisSocket, 1, 45);
 
     const QJsonObject batchMessage =
         waitForMessageType(&subscriber, QStringLiteral("classification_batch"));
@@ -458,16 +490,7 @@ void FallEndToEndStatusTest::streamsClassificationBatchForMultiplePeople() {
     subscriber.flush();
     QTest::qWait(50);
 
-    for (quint64 frameId = 1; frameId <= 45; ++frameId) {
-        AnalysisFramePacket packet;
-        packet.frameId = frameId;
-        packet.cameraId = QStringLiteral("front_cam");
-        packet.width = 640;
-        packet.height = 640;
-        packet.payload = QByteArray("jpeg-bytes");
-        analysisSocket->write(encodeAnalysisFramePacket(packet));
-        analysisSocket->flush();
-    }
+    streamJpegAnalysisFrames(analysisSocket, 1, 45);
 
     QTRY_VERIFY_WITH_TIMEOUT(subscriber.bytesAvailable() > 0 || subscriber.waitForReadyRead(50), 2000);
     const QJsonObject json = QJsonDocument::fromJson(subscriber.readAll().trimmed()).object();
@@ -509,16 +532,7 @@ void FallEndToEndStatusTest::keepsBatchOrderLeftToRightAfterCrossing() {
     subscriber.flush();
     QTest::qWait(50);
 
-    for (quint64 frameId = 1; frameId <= 50; ++frameId) {
-        AnalysisFramePacket packet;
-        packet.frameId = frameId;
-        packet.cameraId = QStringLiteral("front_cam");
-        packet.width = 640;
-        packet.height = 640;
-        packet.payload = QByteArray("jpeg-bytes");
-        analysisSocket->write(encodeAnalysisFramePacket(packet));
-        analysisSocket->flush();
-    }
+    streamJpegAnalysisFrames(analysisSocket, 1, 50);
 
     QLocalSocket statusSocket;
     statusSocket.connectToServer(QStringLiteral("/tmp/rk_fall_e2e_cross.sock"));
@@ -572,16 +586,7 @@ void FallEndToEndStatusTest::isolatesFallConfirmationPerTrackedPerson() {
     subscriber.flush();
     QTest::qWait(50);
 
-    for (quint64 frameId = 1; frameId <= 50; ++frameId) {
-        AnalysisFramePacket packet;
-        packet.frameId = frameId;
-        packet.cameraId = QStringLiteral("front_cam");
-        packet.width = 640;
-        packet.height = 640;
-        packet.payload = QByteArray("jpeg-bytes");
-        analysisSocket->write(encodeAnalysisFramePacket(packet));
-        analysisSocket->flush();
-    }
+    streamJpegAnalysisFrames(analysisSocket, 1, 50);
 
     QLocalSocket statusSocket;
     statusSocket.connectToServer(QStringLiteral("/tmp/rk_fall_e2e_isolated.sock"));

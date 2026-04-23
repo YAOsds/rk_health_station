@@ -13,6 +13,8 @@
 #include <memory>
 
 namespace {
+const char kFallLatencyMarkerEnvVar[] = "RK_FALL_LATENCY_MARKER_PATH";
+
 int validKeypointCount(const PosePerson &person) {
     int count = 0;
     for (const PoseKeypoint &keypoint : person.keypoints) {
@@ -57,6 +59,8 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
     , tracker_(config_)
     , trackIconRegistry_(config_.maxTracks)
     , trackTraceLogger_(config_.trackTracePath)
+    , latencyMarkerWriter_(std::make_unique<LatencyMarkerWriter>(
+          qEnvironmentVariable(kFallLatencyMarkerEnvVar)))
     , ingestClient_(new AnalysisStreamClient(config_.analysisSocketPath, this))
     , gateway_(new FallGateway(FallRuntimeStatus(), this)) {
     connect(ingestClient_, &AnalysisStreamClient::statusChanged, this, [this](bool connected) {
@@ -67,6 +71,19 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
         [this](const AnalysisFramePacket &frame) {
             QString error;
             runtimeStatus_.lastFrameTs = QDateTime::currentMSecsSinceEpoch();
+            if (latencyMarkerWriter_ && !firstFrameMarkerWritten_) {
+                latencyMarkerWriter_->writeEvent(
+                    QStringLiteral("first_analysis_frame"), runtimeStatus_.lastFrameTs,
+                    QJsonObject{
+                        {QStringLiteral("camera_id"), frame.cameraId},
+                        {QStringLiteral("frame_id"), QString::number(frame.frameId)},
+                        {QStringLiteral("pixel_format"),
+                            frame.pixelFormat == AnalysisPixelFormat::Nv12
+                                ? QStringLiteral("nv12")
+                                : QStringLiteral("jpeg")},
+                    });
+                firstFrameMarkerWritten_ = true;
+            }
             const QVector<PosePerson> people = poseEstimator_->infer(frame, &error);
             runtimeStatus_.lastInferTs = QDateTime::currentMSecsSinceEpoch();
             if (!error.isEmpty()) {
@@ -187,6 +204,16 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
 
             if (!batch.results.isEmpty()) {
                 gateway_->publishClassificationBatch(batch);
+                if (latencyMarkerWriter_ && !firstClassificationMarkerWritten_) {
+                    latencyMarkerWriter_->writeEvent(
+                        QStringLiteral("first_classification"), batch.timestampMs,
+                        QJsonObject{
+                            {QStringLiteral("camera_id"), batch.cameraId},
+                            {QStringLiteral("state"), batch.results.first().state},
+                            {QStringLiteral("confidence"), batch.results.first().confidence},
+                        });
+                    firstClassificationMarkerWritten_ = true;
+                }
                 QStringList states;
                 for (const FallClassificationEntry &entry : batch.results) {
                     states.push_back(QStringLiteral("%1:%2")

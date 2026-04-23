@@ -4,12 +4,17 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QTemporaryDir>
 #include <QtTest/QTest>
 
 class FakeVideoPipelineBackend : public VideoPipelineBackend {
 public:
     void setObserver(VideoPipelineObserver *observer) override {
         observer_ = observer;
+    }
+
+    void setAnalysisFrameSource(AnalysisFrameSource *source) override {
+        source_ = source;
     }
 
     bool startPreview(const VideoChannelStatus &, QString *previewUrl, QString *error) override {
@@ -56,6 +61,7 @@ public:
 
 private:
     VideoPipelineObserver *observer_ = nullptr;
+    AnalysisFrameSource *source_ = nullptr;
 };
 
 class VideoServiceTest : public QObject {
@@ -68,6 +74,7 @@ private slots:
     void stopsRecordingAndReturnsToPreviewing();
     void capturesSnapshotAndReturnsAbsolutePath();
     void startsTestInputAndDisablesCameraOnlyOperations();
+    void writesPlaybackStartMarkerWhenTestInputStarts();
     void keepsTestModeAfterPlaybackFinished();
     void restoresCameraModeWhenStoppingTestInput();
 };
@@ -146,6 +153,30 @@ void VideoServiceTest::startsTestInputAndDisablesCameraOnlyOperations() {
         QStringLiteral("unsupported_in_test_mode"));
     QCOMPARE(service.startRecording(QStringLiteral("front_cam")).errorCode,
         QStringLiteral("unsupported_in_test_mode"));
+}
+
+void VideoServiceTest::writesPlaybackStartMarkerWhenTestInputStarts() {
+    FakeVideoPipelineBackend backend;
+    VideoService service(&backend);
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    qputenv("RK_VIDEO_LATENCY_MARKER_PATH",
+        tempDir.filePath(QStringLiteral("video-latency.jsonl")).toUtf8());
+
+    const QString path = QDir::temp().filePath(QStringLiteral("latency-demo.mp4"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.close();
+
+    QVERIFY(service.startTestInput(QStringLiteral("front_cam"), path).ok);
+
+    QFile marker(tempDir.filePath(QStringLiteral("video-latency.jsonl")));
+    QVERIFY(marker.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QByteArray content = marker.readAll();
+    QVERIFY(content.contains("playback_started"));
+
+    qunsetenv("RK_VIDEO_LATENCY_MARKER_PATH");
 }
 
 void VideoServiceTest::keepsTestModeAfterPlaybackFinished() {

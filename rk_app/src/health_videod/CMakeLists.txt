@@ -17,6 +17,8 @@ add_executable(health-videod
     analysis/gstreamer_analysis_output_backend.cpp
     analysis/gstreamer_analysis_output_backend.h
     analysis/analysis_output_backend.h
+    analysis/shared_memory_frame_ring.cpp
+    analysis/shared_memory_frame_ring.h
     core/video_service.cpp
     core/video_service.h
     core/video_storage_service.cpp

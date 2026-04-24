@@ -35,10 +35,16 @@ bool SharedMemoryFrameReader::read(
     }
 
     const SharedFrameSlotHeader *slotHeader = slotHeaderFor(descriptor.slotIndex);
-    const quint64 firstSequence = slotHeader->sequence;
+    const quint64 firstSequence = __atomic_load_n(&slotHeader->sequence, __ATOMIC_ACQUIRE);
     if (firstSequence != descriptor.sequence) {
         if (error) {
             *error = QStringLiteral("analysis_slot_overwritten");
+        }
+        return false;
+    }
+    if ((firstSequence & 1ULL) != 0ULL) {
+        if (error) {
+            *error = QStringLiteral("analysis_slot_incomplete");
         }
         return false;
     }
@@ -58,7 +64,8 @@ bool SharedMemoryFrameReader::read(
     packet->pixelFormat = static_cast<AnalysisPixelFormat>(slotHeader->pixelFormat);
     packet->payload = QByteArray(slotPayloadFor(descriptor.slotIndex), slotHeader->payloadBytes);
 
-    if (slotHeader->sequence != firstSequence) {
+    const quint64 secondSequence = __atomic_load_n(&slotHeader->sequence, __ATOMIC_ACQUIRE);
+    if (secondSequence != firstSequence) {
         if (error) {
             *error = QStringLiteral("analysis_slot_rewritten_during_read");
         }
@@ -68,14 +75,24 @@ bool SharedMemoryFrameReader::read(
 }
 
 bool SharedMemoryFrameReader::ensureMapped(const QString &cameraId, QString *error) {
+    const QString desiredShmName = sharedMemoryNameOverride_.isEmpty()
+        ? sharedMemoryNameForCamera(cameraId)
+        : sharedMemoryNameOverride_;
+
     if (cameraId_ == cameraId && header_) {
-        return true;
+        struct stat statBuffer;
+        if (fd_ >= 0 && ::fstat(fd_, &statBuffer) == 0 && statBuffer.st_nlink > 0) {
+            return true;
+        }
+
+        // The writer recreates the same-named ring when preview/test pipelines restart.
+        // Once the old object is unlinked, this reader must reopen the new ring instead
+        // of continuing to read stale pages from the deleted mapping.
+        cleanup();
     }
 
     cleanup();
-    shmName_ = sharedMemoryNameOverride_.isEmpty()
-        ? sharedMemoryNameForCamera(cameraId)
-        : sharedMemoryNameOverride_;
+    shmName_ = desiredShmName;
     fd_ = ::shm_open(shmName_.toUtf8().constData(), O_RDONLY, 0);
     if (fd_ < 0) {
         if (error) {

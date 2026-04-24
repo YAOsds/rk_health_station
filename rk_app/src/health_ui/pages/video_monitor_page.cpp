@@ -12,7 +12,6 @@
 #include <QPushButton>
 #include <QTimer>
 #include <QVBoxLayout>
-#include <QDebug>
 #include <utility>
 
 VideoMonitorPage::VideoMonitorPage(
@@ -155,11 +154,6 @@ QPushButton *VideoMonitorPage::exitTestModeButton() const {
 }
 
 void VideoMonitorPage::onStatusReceived(const VideoChannelStatus &status) {
-    qInfo() << "health-ui video: status received"
-            << "camera_id=" << status.cameraId
-            << "state=" << cameraStateLabel(status.cameraState)
-            << "preview_url=" << status.previewUrl
-            << "recording=" << status.recording;
     currentCameraId_ = status.cameraId;
     cameraStateValue_->setText(cameraStateLabel(status.cameraState));
     storageDirValue_->setText(status.storageDir);
@@ -185,11 +179,10 @@ void VideoMonitorPage::onStatusReceived(const VideoChannelStatus &status) {
 }
 
 void VideoMonitorPage::onCommandFinished(const VideoCommandResult &result) {
-    qInfo() << "health-ui video: command finished"
-            << "action=" << result.action
-            << "ok=" << result.ok
-            << "error=" << result.errorCode;
     if (!result.ok) {
+        qWarning() << "health-ui video: command failed"
+                   << "action=" << result.action
+                   << "error=" << result.errorCode;
         lastErrorValue_->setText(result.errorCode);
         previewWidget_->setErrorText(result.errorCode);
         resetClassificationState();
@@ -249,6 +242,7 @@ void VideoMonitorPage::onClassificationBatchUpdated(const FallClassificationBatc
 }
 
 void VideoMonitorPage::onFallConnectionChanged(bool connected) {
+    qInfo() << "health-ui video: fall connection changed" << connected;
     fallConnected_ = connected;
     if (!fallConnected_) {
         resetClassificationState();

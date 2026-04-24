@@ -90,6 +90,15 @@ SharedFramePublishResult SharedMemoryFrameRingWriter::publish(const AnalysisFram
     const quint32 slotIndex = nextSlotIndex_++ % header_->slotCount;
     SharedFrameSlotHeader *slotHeader = slotHeaderFor(slotIndex);
     char *slotPayload = slotPayloadFor(slotIndex);
+    const quint64 previousCommittedSequence =
+        __atomic_load_n(&slotHeader->sequence, __ATOMIC_RELAXED);
+    const quint64 writeSequence
+        = (previousCommittedSequence & 1ULL) == 0ULL
+        ? previousCommittedSequence + 1ULL
+        : previousCommittedSequence + 2ULL;
+    const quint64 committedSequence = writeSequence + 1ULL;
+
+    __atomic_store_n(&slotHeader->sequence, writeSequence, __ATOMIC_RELAXED);
 
     memcpy(slotPayload, frame.payload.constData(), static_cast<size_t>(frame.payload.size()));
     slotHeader->frameId = frame.frameId;
@@ -99,11 +108,12 @@ SharedFramePublishResult SharedMemoryFrameRingWriter::publish(const AnalysisFram
     slotHeader->pixelFormat = static_cast<qint32>(frame.pixelFormat);
     slotHeader->payloadBytes = static_cast<quint32>(frame.payload.size());
     slotHeader->flags = 0;
-    slotHeader->sequence += 1;
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    __atomic_store_n(&slotHeader->sequence, committedSequence, __ATOMIC_RELEASE);
 
     header_->publishedFrames += 1;
     result.slotIndex = slotIndex;
-    result.sequence = slotHeader->sequence;
+    result.sequence = committedSequence;
     result.payloadBytes = slotHeader->payloadBytes;
     return result;
 }

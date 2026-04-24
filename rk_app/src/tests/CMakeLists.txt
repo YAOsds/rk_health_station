@@ -573,8 +573,10 @@ add_test(NAME ui_app_dashboard_refresh_test COMMAND ui_app_dashboard_refresh_tes
 add_executable(video_service_test
     video_daemon_tests/video_service_test.cpp
     ../health_videod/analysis/gstreamer_analysis_output_backend.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
 )
 
@@ -623,6 +625,7 @@ add_executable(video_service_analysis_test
     ../health_videod/analysis/shared_memory_frame_ring.cpp
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
 )
 
@@ -642,6 +645,27 @@ target_link_libraries(video_service_analysis_test PRIVATE
 )
 
 add_test(NAME video_service_analysis_test COMMAND video_service_analysis_test)
+
+add_executable(video_runtime_log_stats_test
+    video_daemon_tests/video_runtime_log_stats_test.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
+)
+
+set_target_properties(video_runtime_log_stats_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(video_runtime_log_stats_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
+)
+
+target_link_libraries(video_runtime_log_stats_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME video_runtime_log_stats_test COMMAND video_runtime_log_stats_test)
 
 add_executable(gstreamer_video_pipeline_backend_test
     video_daemon_tests/gstreamer_video_pipeline_backend_test.cpp
@@ -865,6 +889,27 @@ target_link_libraries(fall_gateway_test PRIVATE
 )
 
 add_test(NAME fall_gateway_test COMMAND fall_gateway_test)
+
+add_executable(fall_runtime_log_stats_test
+    fall_daemon_tests/fall_runtime_log_stats_test.cpp
+    ../health_falld/debug/fall_runtime_log_stats.cpp
+)
+
+set_target_properties(fall_runtime_log_stats_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(fall_runtime_log_stats_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+)
+
+target_link_libraries(fall_runtime_log_stats_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME fall_runtime_log_stats_test COMMAND fall_runtime_log_stats_test)
 
 add_executable(sequence_buffer_test
     fall_daemon_tests/sequence_buffer_test.cpp
@@ -1170,6 +1215,7 @@ add_executable(fall_end_to_end_status_test
     ../health_falld/action/stgcn_preprocessor.cpp
     ../health_falld/action/target_selector.cpp
     ../health_falld/app/fall_daemon_app.cpp
+    ../health_falld/debug/fall_runtime_log_stats.cpp
     ../health_falld/domain/fall_detector_service.cpp
     ../health_falld/domain/fall_event_policy.cpp
     ../health_falld/ingest/analysis_stream_client.cpp

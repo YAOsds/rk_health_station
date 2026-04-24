@@ -18,15 +18,12 @@ VideoIpcClient::VideoIpcClient(QObject *parent)
 
 bool VideoIpcClient::connectToBackend() {
     if (socket_->state() == QLocalSocket::ConnectedState) {
-        qInfo() << "health-ui video ipc: already connected";
         return true;
     }
 
     const QString socketName = qEnvironmentVariable(kSocketEnvVar);
     const QString resolvedSocketName
         = socketName.isEmpty() ? QString::fromUtf8(kSocketName) : socketName;
-    qInfo() << "health-ui video ipc: connecting to backend"
-            << "socket_name=" << resolvedSocketName;
     socket_->connectToServer(resolvedSocketName);
     const bool connected = socket_->waitForConnected(3000);
     qInfo() << "health-ui video ipc: connect result"
@@ -89,11 +86,6 @@ void VideoIpcClient::onReadyRead() {
             separatorIndex = readBuffer_.indexOf(kLineSeparator);
             continue;
         }
-        qInfo() << "health-ui video ipc: response received"
-                << "action=" << result.action
-                << "ok=" << result.ok
-                << "error=" << result.errorCode;
-
         if (result.action == QStringLiteral("get_status") || result.action == QStringLiteral("start_preview")) {
             VideoChannelStatus status;
             if (videoChannelStatusFromJson(result.payload, &status)) {
@@ -123,8 +115,4 @@ void VideoIpcClient::sendCommand(
     encoded.append(kLineSeparator);
     socket_->write(encoded);
     socket_->flush();
-    qInfo() << "health-ui video ipc: request sent"
-            << "action=" << action
-            << "camera_id=" << cameraId
-            << "payload_keys=" << payload.keys();
 }

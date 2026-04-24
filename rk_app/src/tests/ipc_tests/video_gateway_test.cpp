@@ -15,6 +15,10 @@ public:
         observer_ = observer;
     }
 
+    void setAnalysisFrameSource(AnalysisFrameSource *source) override {
+        analysisFrameSource_ = source;
+    }
+
     bool startPreview(const VideoChannelStatus &, QString *previewUrl, QString *error) override {
         *previewUrl = QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview");
         error->clear();
@@ -43,6 +47,7 @@ public:
 
 private:
     VideoPipelineObserver *observer_ = nullptr;
+    AnalysisFrameSource *analysisFrameSource_ = nullptr;
 };
 
 class VideoGatewayTest : public QObject {

@@ -671,6 +671,7 @@ add_executable(gstreamer_video_pipeline_backend_test
     video_daemon_tests/gstreamer_video_pipeline_backend_test.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
 )
 
 set_target_properties(gstreamer_video_pipeline_backend_test PROPERTIES
@@ -733,9 +734,11 @@ add_test(NAME video_daemon_shutdown_test COMMAND video_daemon_shutdown_test)
 add_executable(video_gateway_test
     ipc_tests/video_gateway_test.cpp
     ../health_videod/analysis/gstreamer_analysis_output_backend.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
     ../health_videod/ipc/video_gateway.cpp
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
 )
 

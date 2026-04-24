@@ -56,8 +56,6 @@ VideoPreviewWidget::VideoPreviewWidget(QWidget *parent)
 }
 
 void VideoPreviewWidget::setPreviewSource(const QString &url, int width, int height) {
-    qInfo() << "health-ui video: set preview source" << url << width << height;
-
     if (url.isEmpty()) {
         consumer_->stop();
         currentFrame_ = QImage();

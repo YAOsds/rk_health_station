@@ -66,11 +66,6 @@ void VideoPreviewConsumer::start(const VideoPreviewSource &source) {
     currentSource_ = source;
     stopping_ = false;
 
-    qInfo() << "health-ui video: preview consumer started"
-            << "source=" << currentSource_.url
-            << "host=" << previewHost_
-            << "port=" << previewPort_
-            << "boundary=" << boundaryMarker_;
     socket_->connectToHost(previewHost_, previewPort_);
     setActive(true);
 }

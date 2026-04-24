@@ -1,7 +1,12 @@
 #include "pipeline/gstreamer_video_pipeline_backend.h"
+#include "analysis/shared_memory_frame_ring.h"
 
+#include <fcntl.h>
 #include <QFile>
 #include <QTemporaryDir>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <QtTest/QTest>
 
 class RecordingAnalysisFrameSource : public AnalysisFrameSource {
@@ -10,12 +15,12 @@ public:
         return enabled && cameraId == QStringLiteral("front_cam");
     }
 
-    void publishFrame(const AnalysisFramePacket &packet) override {
-        packets.append(packet);
+    void publishDescriptor(const AnalysisFrameDescriptor &descriptor) override {
+        descriptors.append(descriptor);
     }
 
     bool enabled = true;
-    QVector<AnalysisFramePacket> packets;
+    QVector<AnalysisFrameDescriptor> descriptors;
 };
 
 class GstreamerVideoPipelineBackendTest : public QObject {
@@ -26,6 +31,7 @@ private slots:
     void returnsTcpMjpegPreviewUrlForRunningPreview();
     void usesGenericFileDecodePipelineForTestInput();
     void forwardsRgbFramesToAnalysisSource();
+    void usesBurstTolerantSharedMemoryRingSize();
     void capsAnalysisTapRateAtStableBaselineFps();
 };
 
@@ -182,13 +188,64 @@ void GstreamerVideoPipelineBackendTest::forwardsRgbFramesToAnalysisSource() {
     QString previewUrl;
     QString error;
     QVERIFY(backend.startPreview(status, &previewUrl, &error));
-    QTRY_COMPARE_WITH_TIMEOUT(analysisSource.packets.size(), 1, 2000);
-    QCOMPARE(analysisSource.packets.first().cameraId, QStringLiteral("front_cam"));
-    QCOMPARE(analysisSource.packets.first().width, 640);
-    QCOMPARE(analysisSource.packets.first().height, 640);
-    QCOMPARE(analysisSource.packets.first().pixelFormat, AnalysisPixelFormat::Rgb);
-    QCOMPARE(analysisSource.packets.first().payload.size(), 640 * 640 * 3);
+    QTRY_COMPARE_WITH_TIMEOUT(analysisSource.descriptors.size(), 1, 2000);
+    QCOMPARE(analysisSource.descriptors.first().cameraId, QStringLiteral("front_cam"));
+    QCOMPARE(analysisSource.descriptors.first().width, 640);
+    QCOMPARE(analysisSource.descriptors.first().height, 640);
+    QCOMPARE(analysisSource.descriptors.first().pixelFormat, AnalysisPixelFormat::Rgb);
+    QCOMPARE(analysisSource.descriptors.first().payloadBytes, 640u * 640u * 3u);
 
+    qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
+}
+
+void GstreamerVideoPipelineBackendTest::usesBurstTolerantSharedMemoryRingSize() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString launcherPath = tempDir.filePath(QStringLiteral("fake-gst-launch.sh"));
+    QFile launcher(launcherPath);
+    QVERIFY(launcher.open(QIODevice::WriteOnly | QIODevice::Text));
+    launcher.write(
+        "#!/bin/sh\n"
+        "dd if=/dev/zero bs=1228800 count=1 2>/dev/null\n"
+        "sleep 2\n");
+    launcher.close();
+    QVERIFY(QFile::setPermissions(launcherPath,
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+    qputenv("RK_VIDEO_GST_LAUNCH_BIN", launcherPath.toUtf8());
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.previewProfile.width = 4;
+    status.previewProfile.height = 2;
+    status.previewProfile.fps = 30;
+    status.previewProfile.pixelFormat = QStringLiteral("NV12");
+
+    RecordingAnalysisFrameSource analysisSource;
+    GstreamerVideoPipelineBackend backend;
+    backend.setAnalysisFrameSource(&analysisSource);
+
+    QString previewUrl;
+    QString error;
+    QVERIFY(backend.startPreview(status, &previewUrl, &error));
+    QTRY_COMPARE_WITH_TIMEOUT(analysisSource.descriptors.size(), 1, 2000);
+
+    const QString shmName = sharedMemoryNameForCamera(QStringLiteral("front_cam"));
+    const int fd = ::shm_open(shmName.toUtf8().constData(), O_RDONLY, 0);
+    QVERIFY(fd >= 0);
+
+    struct stat statBuffer;
+    QCOMPARE(::fstat(fd, &statBuffer), 0);
+    void *mapped = ::mmap(nullptr, static_cast<size_t>(statBuffer.st_size), PROT_READ, MAP_SHARED, fd, 0);
+    QVERIFY(mapped != MAP_FAILED);
+
+    const auto *header = static_cast<const SharedFrameRingHeader *>(mapped);
+    QCOMPARE(header->slotCount, 32);
+
+    QVERIFY(::munmap(mapped, static_cast<size_t>(statBuffer.st_size)) == 0);
+    QVERIFY(::close(fd) == 0);
     qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
 }
 

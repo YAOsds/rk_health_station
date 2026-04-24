@@ -1,19 +1,24 @@
 #include "ingest/analysis_stream_client.h"
 
-#include "protocol/analysis_stream_protocol.h"
+#include "debug/latency_marker_writer.h"
+#include "protocol/analysis_frame_descriptor_protocol.h"
 
+#include <QDateTime>
 #include <QLocalSocket>
 #include <QTimer>
 
 namespace {
 constexpr int kReconnectDelayMs = 300;
+const char kFallLatencyMarkerEnvVar[] = "RK_FALL_LATENCY_MARKER_PATH";
 }
 
-AnalysisStreamClient::AnalysisStreamClient(const QString &socketName, QObject *parent)
+AnalysisStreamClient::AnalysisStreamClient(
+    const QString &socketName, const QString &sharedMemoryNameOverride, QObject *parent)
     : QObject(parent)
     , socketName_(socketName)
     , socket_(new QLocalSocket(this))
-    , reconnectTimer_(new QTimer(this)) {
+    , reconnectTimer_(new QTimer(this))
+    , reader_(sharedMemoryNameOverride) {
     reconnectTimer_->setSingleShot(true);
     connect(reconnectTimer_, &QTimer::timeout, this, &AnalysisStreamClient::attemptConnect);
     connect(socket_, &QLocalSocket::readyRead, this, &AnalysisStreamClient::onReadyRead);
@@ -75,15 +80,20 @@ void AnalysisStreamClient::scheduleReconnect() {
 void AnalysisStreamClient::onReadyRead() {
     readBuffer_.append(socket_->readAll());
 
-    AnalysisFramePacket packet;
-    AnalysisFramePacket latestPacket;
-    bool hasPacket = false;
-    while (takeFirstAnalysisFramePacket(&readBuffer_, &packet)) {
-        latestPacket = packet;
-        hasPacket = true;
-    }
-
-    if (hasPacket) {
-        emit frameReceived(latestPacket);
+    AnalysisFrameDescriptor descriptor;
+    while (takeFirstAnalysisFrameDescriptor(&readBuffer_, &descriptor)) {
+        AnalysisFramePacket packet;
+        QString error;
+        if (!reader_.read(descriptor, &packet, &error)) {
+            continue;
+        }
+        LatencyMarkerWriter marker(qEnvironmentVariable(kFallLatencyMarkerEnvVar));
+        marker.writeEvent(QStringLiteral("analysis_descriptor_ingested"),
+            QDateTime::currentMSecsSinceEpoch(),
+            QJsonObject{
+                {QStringLiteral("camera_id"), packet.cameraId},
+                {QStringLiteral("frame_id"), QString::number(packet.frameId)},
+            });
+        emit frameReceived(packet);
     }
 }

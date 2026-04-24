@@ -1,12 +1,14 @@
 #pragma once
 
 #include "pipeline/video_pipeline_backend.h"
+#include "debug/video_runtime_log_stats.h"
 
 #include <QByteArray>
 #include <QHash>
 #include <QString>
 
 class QProcess;
+class SharedMemoryFrameRingWriter;
 
 class GstreamerVideoPipelineBackend : public VideoPipelineBackend {
 public:
@@ -33,6 +35,8 @@ private:
         int analysisFrameBytes = 0;
         quint64 nextFrameId = 1;
         QByteArray stdoutBuffer;
+        SharedMemoryFrameRingWriter *frameRing = nullptr;
+        VideoRuntimeLogStats logStats;
     };
 
     QString gstLaunchBinary() const;

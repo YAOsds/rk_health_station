@@ -6,6 +6,7 @@
 #include "pipeline/video_pipeline_backend.h"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QFileInfo>
 
@@ -192,6 +193,11 @@ VideoCommandResult VideoService::startRecording(const QString &cameraId) {
     channel.cameraState = VideoCameraState::Recording;
     channel.lastError.clear();
 
+    qInfo().noquote()
+        << QStringLiteral("video_runtime camera=%1 event=recording_started path=%2")
+               .arg(cameraId)
+               .arg(outputPath);
+
     QJsonObject payload;
     payload.insert(QStringLiteral("record_path"), outputPath);
     return buildOkResult(cameraId, QStringLiteral("start_recording"), payload);
@@ -221,6 +227,11 @@ VideoCommandResult VideoService::stopRecording(const QString &cameraId) {
     channel.lastError.clear();
     channel.previewUrl.clear();
     channel.cameraState = VideoCameraState::Idle;
+
+    qInfo().noquote()
+        << QStringLiteral("video_runtime camera=%1 event=recording_stopped path=%2")
+               .arg(cameraId)
+               .arg(channel.currentRecordPath);
 
     QString previewError;
     if (!ensurePreview(cameraId, &previewError)) {
@@ -256,6 +267,10 @@ VideoCommandResult VideoService::startTestInput(const QString &cameraId, const Q
     if (!restartPreviewForChannel(cameraId, &errorCode)) {
         channels_[cameraId] = previous;
         Q_UNUSED(errorCode);
+        qWarning().noquote()
+            << QStringLiteral("video_runtime camera=%1 event=start_test_input_failed error=%2")
+                   .arg(cameraId)
+                   .arg(QStringLiteral("test_input_start_failed"));
         return buildErrorResult(cameraId, QStringLiteral("start_test_input"),
             QStringLiteral("test_input_start_failed"));
     }
@@ -267,6 +282,11 @@ VideoCommandResult VideoService::startTestInput(const QString &cameraId, const Q
             {QStringLiteral("file_path"), channel.testFilePath},
             {QStringLiteral("input_mode"), channel.inputMode},
         });
+
+    qInfo().noquote()
+        << QStringLiteral("video_runtime camera=%1 event=test_input_started file=%2")
+               .arg(cameraId)
+               .arg(channel.testFilePath);
 
     return buildOkResult(cameraId, QStringLiteral("start_test_input"),
         videoChannelStatusToJson(channels_.value(cameraId)));
@@ -287,9 +307,17 @@ VideoCommandResult VideoService::stopTestInput(const QString &cameraId) {
     if (!restartPreviewForChannel(cameraId, &errorCode)) {
         channels_[cameraId] = previous;
         Q_UNUSED(errorCode);
+        qWarning().noquote()
+            << QStringLiteral("video_runtime camera=%1 event=stop_test_input_failed error=%2")
+                   .arg(cameraId)
+                   .arg(QStringLiteral("test_input_stop_failed"));
         return buildErrorResult(cameraId, QStringLiteral("stop_test_input"),
             QStringLiteral("test_input_stop_failed"));
     }
+
+    qInfo().noquote()
+        << QStringLiteral("video_runtime camera=%1 event=test_input_stopped")
+               .arg(cameraId);
 
     return buildOkResult(cameraId, QStringLiteral("stop_test_input"),
         videoChannelStatusToJson(channels_.value(cameraId)));

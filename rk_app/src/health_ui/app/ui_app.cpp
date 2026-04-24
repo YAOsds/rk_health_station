@@ -161,13 +161,11 @@ UiApp::UiApp(QObject *parent)
 }
 
 bool UiApp::start() {
-    qInfo() << "health-ui lifecycle: showing main window";
     window_->show();
 
     const bool connected = client_->connectToBackend();
     qInfo() << "health-ui lifecycle: backend connection result" << connected;
     if (connected) {
-        qInfo() << "health-ui lifecycle: dispatching initial requests";
         client_->requestDeviceList();
         client_->requestDashboardSnapshot();
         client_->requestPendingDevices();
@@ -182,7 +180,6 @@ QMainWindow *UiApp::window() const {
 }
 
 void UiApp::openVideoPage() {
-    qInfo() << "health-ui lifecycle: switching to video page";
     stack_->setCurrentWidget(videoMonitorPage_);
     const bool connected = videoClient_->connectToBackend();
     const bool fallConnected = fallClient_->connectToBackend();
@@ -192,8 +189,6 @@ void UiApp::openVideoPage() {
 }
 
 void UiApp::onDeviceListReceived(const QJsonArray &devices) {
-    qInfo() << "health-ui ui: device list received"
-            << "device_count=" << devices.size();
     deviceListPage_->setDevices(devices);
     settingsPage_->setDevices(devices);
     historyPage_->setDevices(devices);
@@ -203,37 +198,26 @@ void UiApp::onDeviceListReceived(const QJsonArray &devices) {
 }
 
 void UiApp::onDashboardSnapshotReceived(const QJsonObject &snapshot) {
-    qInfo() << "health-ui ui: dashboard snapshot received"
-            << "keys=" << snapshot.keys();
     dashboardPage_->setSnapshot(snapshot);
 }
 
 void UiApp::onPendingDevicesReceived(const QJsonArray &devices) {
-    qInfo() << "health-ui ui: pending devices received"
-            << "pending_count=" << devices.size();
     deviceApprovalPage_->setPendingDevices(devices);
 }
 
 void UiApp::onAlertsSnapshotReceived(const QJsonArray &alerts) {
-    qInfo() << "health-ui ui: alerts snapshot received"
-            << "alert_count=" << alerts.size();
     alertsPage_->setAlerts(alerts);
 }
 
 void UiApp::onHistorySeriesReceived(const QJsonObject &payload) {
-    qInfo() << "health-ui ui: history series received"
-            << "keys=" << payload.keys();
     historyPage_->setSeries(payload);
 }
 
 void UiApp::onOperationFinished(const QString &, bool ok, const QJsonObject &) {
-    qInfo() << "health-ui ui: operation finished"
-            << "ok=" << ok;
     if (!ok) {
         return;
     }
 
-    qInfo() << "health-ui lifecycle: refreshing views after successful operation";
     client_->requestDeviceList();
     client_->requestDashboardSnapshot();
     client_->requestPendingDevices();

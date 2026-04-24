@@ -54,15 +54,12 @@ UiIpcClient::UiIpcClient(QObject *parent)
 
 bool UiIpcClient::connectToBackend() {
     if (isConnected()) {
-        qInfo() << "health-ui ipc: connect requested while already connected";
         return true;
     }
 
     const QString socketName = qEnvironmentVariable(kSocketEnvVar);
     const QString resolvedSocketName
         = socketName.isEmpty() ? QString::fromUtf8(kSocketName) : socketName;
-    qInfo() << "health-ui ipc: connecting to backend"
-            << "socket_name=" << resolvedSocketName;
     socket_->connectToServer(resolvedSocketName);
     const bool ok = socket_->waitForConnected(3000);
     if (!ok) {
@@ -178,10 +175,6 @@ void UiIpcClient::sendRequest(const QString &action, const QString &reqId, const
 
     const QByteArray encoded = encodeMessage(request);
     if (!encoded.isEmpty()) {
-        qInfo() << "health-ui ipc: request sent"
-                << "action=" << action
-                << "req_id=" << reqId
-                << "payload_keys=" << payload.keys();
         socket_->write(encoded);
         socket_->flush();
     }
@@ -194,11 +187,6 @@ void UiIpcClient::handleMessage(const IpcMessage &message) {
                    << "action=" << message.action;
         return;
     }
-
-    qInfo() << "health-ui ipc: response received"
-            << "action=" << message.action
-            << "req_id=" << message.reqId
-            << "ok=" << message.ok;
 
     if (message.action == QStringLiteral("get_device_list")) {
         emit deviceListReceived(message.payload.value(QStringLiteral("devices")).toArray());

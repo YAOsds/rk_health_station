@@ -40,6 +40,11 @@ FallRuntimeConfig loadFallRuntimeConfig() {
         config.analysisSocketPath = analysisSocketPath;
     }
 
+    const QString analysisSharedMemoryName = qEnvironmentVariable("RK_VIDEO_ANALYSIS_SHM_NAME");
+    if (!analysisSharedMemoryName.isEmpty()) {
+        config.analysisSharedMemoryName = analysisSharedMemoryName;
+    }
+
     const QString poseModelPath = qEnvironmentVariable("RK_FALL_POSE_MODEL_PATH");
     if (!poseModelPath.isEmpty()) {
         config.poseModelPath = poseModelPath;

@@ -1,5 +1,9 @@
 #include "pipeline/gstreamer_video_pipeline_backend.h"
 
+#include "analysis/analysis_output_backend.h"
+#include "debug/latency_marker_writer.h"
+#include "analysis/shared_memory_frame_ring.h"
+
 #include <QDateTime>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -12,8 +16,10 @@ const int kStartupProbeMs = 750;
 const int kStableAnalysisTapFps = 15;
 const int kAnalysisOutputWidth = 640;
 const int kAnalysisOutputHeight = 640;
+const quint16 kAnalysisRingSlotCount = 32;
 const char kGstLaunchEnvVar[] = "RK_VIDEO_GST_LAUNCH_BIN";
 const char kDefaultGstLaunchBinary[] = "gst-launch-1.0";
+const char kVideoLatencyMarkerEnvVar[] = "RK_VIDEO_LATENCY_MARKER_PATH";
 }
 
 GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend() = default;
@@ -245,8 +251,60 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
         packet.payload = pipeline.stdoutBuffer.left(pipeline.analysisFrameBytes);
         pipeline.stdoutBuffer.remove(0, pipeline.analysisFrameBytes);
 
-        if (analysisFrameSource_ && analysisFrameSource_->acceptsFrames(packet.cameraId)) {
-            analysisFrameSource_->publishFrame(packet);
+        if (analysisFrameSource_ && analysisFrameSource_->acceptsFrames(packet.cameraId)
+            && pipeline.frameRing) {
+            const SharedFramePublishResult publish = pipeline.frameRing->publish(packet);
+            if (publish.sequence == 0) {
+                continue;
+            }
+
+            AnalysisFrameDescriptor descriptor;
+            descriptor.frameId = packet.frameId;
+            descriptor.timestampMs = packet.timestampMs;
+            descriptor.cameraId = packet.cameraId;
+            descriptor.width = packet.width;
+            descriptor.height = packet.height;
+            descriptor.pixelFormat = packet.pixelFormat;
+            descriptor.slotIndex = publish.slotIndex;
+            descriptor.sequence = publish.sequence;
+            descriptor.payloadBytes = publish.payloadBytes;
+            analysisFrameSource_->publishDescriptor(descriptor);
+
+            bool streamConnected = false;
+            if (auto *outputBackend = dynamic_cast<AnalysisOutputBackend *>(analysisFrameSource_)) {
+                streamConnected = outputBackend->statusForCamera(packet.cameraId).streamConnected;
+            }
+            pipeline.logStats.onDescriptorPublished(
+                packet.cameraId,
+                pipeline.testInput ? QStringLiteral("test_file") : QStringLiteral("camera"),
+                streamConnected,
+                pipeline.frameRing->droppedFrames(),
+                packet.timestampMs);
+            if (const auto summary = pipeline.logStats.takeSummaryIfDue(packet.timestampMs)) {
+                qInfo().noquote()
+                    << QStringLiteral(
+                           "video_perf camera=%1 mode=%2 state=%3 fps=%4 published=%5 dropped_total=%6 dropped_delta=%7 consumers=%8")
+                           .arg(summary->cameraId)
+                           .arg(summary->inputMode)
+                           .arg(pipeline.recording ? QStringLiteral("recording")
+                                                   : QStringLiteral("previewing"))
+                           .arg(QString::number(summary->publishFps, 'f', 1))
+                           .arg(summary->publishedFramesWindow)
+                           .arg(summary->droppedFramesTotal)
+                           .arg(summary->droppedFramesDelta)
+                           .arg(summary->consumerConnected ? 1 : 0);
+            }
+
+            LatencyMarkerWriter marker(qEnvironmentVariable(kVideoLatencyMarkerEnvVar));
+            marker.writeEvent(QStringLiteral("analysis_descriptor_published"), packet.timestampMs,
+                QJsonObject{
+                    {QStringLiteral("camera_id"), packet.cameraId},
+                    {QStringLiteral("frame_id"), QString::number(packet.frameId)},
+                    {QStringLiteral("slot_index"), static_cast<int>(descriptor.slotIndex)},
+                    {QStringLiteral("sequence"), QString::number(descriptor.sequence)},
+                    {QStringLiteral("dropped_frames"),
+                        static_cast<double>(pipeline.frameRing->droppedFrames())},
+                });
         }
     }
 }
@@ -278,16 +336,24 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
 
             const ActivePipeline pipeline = pipelines_.take(cameraId);
             const bool testInput = pipeline.testInput;
+            delete pipeline.frameRing;
             delete process;
 
             if (!observer_) {
                 return;
             }
             if (testInput && exitStatus == QProcess::NormalExit && exitCode == 0) {
+                qInfo().noquote()
+                    << QStringLiteral("video_runtime camera=%1 event=playback_finished")
+                           .arg(cameraId);
                 observer_->onPipelinePlaybackFinished(cameraId);
                 return;
             }
             if (exitStatus != QProcess::NormalExit || exitCode != 0) {
+                qWarning().noquote()
+                    << QStringLiteral("video_runtime camera=%1 event=pipeline_error error=%2")
+                           .arg(cameraId)
+                           .arg(QStringLiteral("preview_pipeline_failed"));
                 observer_->onPipelineRuntimeError(cameraId, QStringLiteral("preview_pipeline_failed"));
             }
         });
@@ -325,8 +391,36 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
     pipeline.analysisFrameBytes = analysisWidth > 0 && analysisHeight > 0
         ? analysisWidth * analysisHeight * 3
         : 0;
+    if (pipeline.analysisFrameBytes > 0) {
+        pipeline.frameRing = new SharedMemoryFrameRingWriter(
+            cameraId, kAnalysisRingSlotCount, static_cast<quint32>(pipeline.analysisFrameBytes));
+        QString ringError;
+        if (!pipeline.frameRing->initialize(&ringError)) {
+            const QString finalError = ringError.isEmpty()
+                ? QStringLiteral("analysis_ring_init_failed")
+                : ringError;
+            qWarning().noquote()
+                << QStringLiteral("video_runtime camera=%1 event=analysis_ring_init_failed error=%2")
+                       .arg(cameraId)
+                       .arg(finalError);
+            if (error) {
+                *error = finalError;
+            }
+            delete pipeline.frameRing;
+            process->kill();
+            process->waitForFinished(kStopTimeoutMs);
+            delete process;
+            return false;
+        }
+    }
     pipelines_.insert(cameraId, pipeline);
     processAnalysisStdout(cameraId);
+
+    qInfo().noquote()
+        << QStringLiteral("video_runtime camera=%1 event=preview_started mode=%2 analysis=%3")
+               .arg(cameraId)
+               .arg(pipeline.testInput ? QStringLiteral("test_file") : QStringLiteral("camera"))
+               .arg(pipeline.analysisFrameBytes > 0 ? 1 : 0);
 
     if (previewUrl) {
         *previewUrl = pipeline.previewUrl;
@@ -387,6 +481,9 @@ bool GstreamerVideoPipelineBackend::stopActivePipeline(const QString &cameraId, 
     if (pipeline.process->state() != QProcess::NotRunning && error) {
         *error = QStringLiteral("pipeline_stop_failed");
     }
+    qInfo().noquote()
+        << QStringLiteral("video_runtime camera=%1 event=preview_stopped").arg(cameraId);
+    delete pipeline.frameRing;
     delete pipeline.process;
     return error ? error->isEmpty() : true;
 }

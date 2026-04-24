@@ -1,6 +1,6 @@
 #include "analysis/gstreamer_analysis_output_backend.h"
 
-#include "protocol/analysis_stream_protocol.h"
+#include "protocol/analysis_frame_descriptor_protocol.h"
 
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -99,8 +99,8 @@ bool GstreamerAnalysisOutputBackend::acceptsFrames(const QString &cameraId) cons
     return status.cameraId == cameraId && status.enabled;
 }
 
-void GstreamerAnalysisOutputBackend::publishFrame(const AnalysisFramePacket &packet) {
-    if (!acceptsFrames(packet.cameraId)) {
+void GstreamerAnalysisOutputBackend::publishDescriptor(const AnalysisFrameDescriptor &descriptor) {
+    if (!acceptsFrames(descriptor.cameraId)) {
         return;
     }
 
@@ -108,19 +108,20 @@ void GstreamerAnalysisOutputBackend::publishFrame(const AnalysisFramePacket &pac
         onNewLocalConnection();
     }
 
-    AnalysisChannelStatus status = statuses_.value(packet.cameraId, defaultStatusForCamera(packet.cameraId));
+    AnalysisChannelStatus status
+        = statuses_.value(descriptor.cameraId, defaultStatusForCamera(descriptor.cameraId));
     status.enabled = true;
     status.streamConnected = true;
-    status.outputFormat = pixelFormatName(packet.pixelFormat);
-    if (packet.width > 0) {
-        status.width = packet.width;
+    status.outputFormat = pixelFormatName(descriptor.pixelFormat);
+    if (descriptor.width > 0) {
+        status.width = descriptor.width;
     }
-    if (packet.height > 0) {
-        status.height = packet.height;
+    if (descriptor.height > 0) {
+        status.height = descriptor.height;
     }
-    statuses_.insert(packet.cameraId, status);
+    statuses_.insert(descriptor.cameraId, status);
 
-    const QByteArray encoded = encodeAnalysisFramePacket(packet);
+    const QByteArray encoded = encodeAnalysisFrameDescriptor(descriptor);
     for (int i = clients_.size() - 1; i >= 0; --i) {
         QLocalSocket *client = clients_.at(i);
         if (!client || client->state() != QLocalSocket::ConnectedState) {

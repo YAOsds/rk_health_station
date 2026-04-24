@@ -21,7 +21,7 @@ public:
     bool stop(const QString &cameraId, QString *error) override;
     AnalysisChannelStatus statusForCamera(const QString &cameraId) const override;
     bool acceptsFrames(const QString &cameraId) const override;
-    void publishFrame(const AnalysisFramePacket &packet) override;
+    void publishDescriptor(const AnalysisFrameDescriptor &descriptor) override;
 
 private:
     void ensureLocalServer(QString *error);

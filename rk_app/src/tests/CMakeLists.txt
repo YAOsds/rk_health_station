@@ -59,6 +59,21 @@ target_link_libraries(analysis_stream_protocol_test PRIVATE
 
 add_test(NAME analysis_stream_protocol_test COMMAND analysis_stream_protocol_test)
 
+add_executable(analysis_frame_descriptor_protocol_test
+    protocol_tests/analysis_frame_descriptor_protocol_test.cpp
+)
+
+set_target_properties(analysis_frame_descriptor_protocol_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(analysis_frame_descriptor_protocol_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME analysis_frame_descriptor_protocol_test COMMAND analysis_frame_descriptor_protocol_test)
+
 add_executable(latency_marker_writer_test
     protocol_tests/latency_marker_writer_test.cpp
 )
@@ -558,8 +573,10 @@ add_test(NAME ui_app_dashboard_refresh_test COMMAND ui_app_dashboard_refresh_tes
 add_executable(video_service_test
     video_daemon_tests/video_service_test.cpp
     ../health_videod/analysis/gstreamer_analysis_output_backend.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
 )
 
@@ -605,8 +622,10 @@ add_test(NAME analysis_output_backend_test COMMAND analysis_output_backend_test)
 add_executable(video_service_analysis_test
     video_daemon_tests/video_service_analysis_test.cpp
     ../health_videod/analysis/gstreamer_analysis_output_backend.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
 )
 
@@ -627,9 +646,31 @@ target_link_libraries(video_service_analysis_test PRIVATE
 
 add_test(NAME video_service_analysis_test COMMAND video_service_analysis_test)
 
+add_executable(video_runtime_log_stats_test
+    video_daemon_tests/video_runtime_log_stats_test.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
+)
+
+set_target_properties(video_runtime_log_stats_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(video_runtime_log_stats_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
+)
+
+target_link_libraries(video_runtime_log_stats_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME video_runtime_log_stats_test COMMAND video_runtime_log_stats_test)
+
 add_executable(gstreamer_video_pipeline_backend_test
     video_daemon_tests/gstreamer_video_pipeline_backend_test.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
 )
 
 set_target_properties(gstreamer_video_pipeline_backend_test PROPERTIES
@@ -647,6 +688,27 @@ target_link_libraries(gstreamer_video_pipeline_backend_test PRIVATE
 )
 
 add_test(NAME gstreamer_video_pipeline_backend_test COMMAND gstreamer_video_pipeline_backend_test)
+
+add_executable(shared_memory_frame_ring_test
+    video_daemon_tests/shared_memory_frame_ring_test.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
+)
+
+set_target_properties(shared_memory_frame_ring_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(shared_memory_frame_ring_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(shared_memory_frame_ring_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME shared_memory_frame_ring_test COMMAND shared_memory_frame_ring_test)
 
 add_executable(video_daemon_shutdown_test
     video_daemon_tests/video_daemon_shutdown_test.cpp
@@ -828,6 +890,27 @@ target_link_libraries(fall_gateway_test PRIVATE
 
 add_test(NAME fall_gateway_test COMMAND fall_gateway_test)
 
+add_executable(fall_runtime_log_stats_test
+    fall_daemon_tests/fall_runtime_log_stats_test.cpp
+    ../health_falld/debug/fall_runtime_log_stats.cpp
+)
+
+set_target_properties(fall_runtime_log_stats_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(fall_runtime_log_stats_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+)
+
+target_link_libraries(fall_runtime_log_stats_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME fall_runtime_log_stats_test COMMAND fall_runtime_log_stats_test)
+
 add_executable(sequence_buffer_test
     fall_daemon_tests/sequence_buffer_test.cpp
     ../health_falld/action/sequence_buffer.cpp
@@ -889,7 +972,9 @@ add_test(NAME track_manager_test COMMAND track_manager_test)
 
 add_executable(analysis_stream_client_test
     fall_daemon_tests/analysis_stream_client_test.cpp
+    ../health_falld/ingest/shared_memory_frame_reader.cpp
     ../health_falld/ingest/analysis_stream_client.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
 )
 
 set_target_properties(analysis_stream_client_test PROPERTIES
@@ -898,6 +983,7 @@ set_target_properties(analysis_stream_client_test PROPERTIES
 
 target_include_directories(analysis_stream_client_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 
@@ -908,6 +994,30 @@ target_link_libraries(analysis_stream_client_test PRIVATE
 )
 
 add_test(NAME analysis_stream_client_test COMMAND analysis_stream_client_test)
+
+add_executable(shared_memory_frame_reader_test
+    fall_daemon_tests/shared_memory_frame_reader_test.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_falld/ingest/shared_memory_frame_reader.cpp
+)
+
+set_target_properties(shared_memory_frame_reader_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(shared_memory_frame_reader_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(shared_memory_frame_reader_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME shared_memory_frame_reader_test COMMAND shared_memory_frame_reader_test)
 
 add_executable(fall_runtime_pose_stub_test
     fall_daemon_tests/fall_runtime_pose_stub_test.cpp
@@ -1105,11 +1215,14 @@ add_executable(fall_end_to_end_status_test
     ../health_falld/action/stgcn_preprocessor.cpp
     ../health_falld/action/target_selector.cpp
     ../health_falld/app/fall_daemon_app.cpp
+    ../health_falld/debug/fall_runtime_log_stats.cpp
     ../health_falld/domain/fall_detector_service.cpp
     ../health_falld/domain/fall_event_policy.cpp
     ../health_falld/ingest/analysis_stream_client.cpp
+    ../health_falld/ingest/shared_memory_frame_reader.cpp
     ../health_falld/ipc/fall_gateway.cpp
     ../health_falld/pose/rknn_pose_estimator.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
     ../health_falld/tracking/association.cpp
     ../health_falld/tracking/byte_tracker.cpp
     ../health_falld/tracking/kalman_filter.cpp
@@ -1124,6 +1237,7 @@ set_target_properties(fall_end_to_end_status_test PROPERTIES
 
 target_include_directories(fall_end_to_end_status_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 

@@ -36,12 +36,16 @@ add_executable(health-falld
     action/target_selector.h
     app/fall_daemon_app.cpp
     app/fall_daemon_app.h
+    debug/fall_runtime_log_stats.cpp
+    debug/fall_runtime_log_stats.h
     domain/fall_detector_service.cpp
     domain/fall_detector_service.h
     domain/fall_event_policy.cpp
     domain/fall_event_policy.h
     ingest/analysis_stream_client.cpp
     ingest/analysis_stream_client.h
+    ingest/shared_memory_frame_reader.cpp
+    ingest/shared_memory_frame_reader.h
     ipc/fall_gateway.cpp
     ipc/fall_gateway.h
     pose/nv12_preprocessor.cpp
@@ -77,6 +81,7 @@ set_target_properties(health-falld PROPERTIES
 
 target_include_directories(health-falld PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
 )
 
 target_link_libraries(health-falld PRIVATE

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/fall_detector_service.h"
+#include "debug/fall_runtime_log_stats.h"
 #include "debug/latency_marker_writer.h"
 #include "models/fall_models.h"
 #include "pose/pose_estimator.h"
@@ -35,9 +36,12 @@ private:
     ByteTracker tracker_;
     TrackIconRegistry trackIconRegistry_;
     TrackTraceLogger trackTraceLogger_;
+    FallRuntimeLogStats logStats_;
     std::unique_ptr<LatencyMarkerWriter> latencyMarkerWriter_;
     bool firstFrameMarkerWritten_ = false;
     bool firstClassificationMarkerWritten_ = false;
+    QString lastLoggedError_;
+    QString lastLoggedState_;
     AnalysisStreamClient *ingestClient_ = nullptr;
     FallGateway *gateway_ = nullptr;
 };

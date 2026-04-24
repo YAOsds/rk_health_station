@@ -21,6 +21,18 @@ struct AnalysisFramePacket {
     QByteArray payload;
 };
 
+struct AnalysisFrameDescriptor {
+    quint64 frameId = 0;
+    qint64 timestampMs = 0;
+    QString cameraId;
+    qint32 width = 0;
+    qint32 height = 0;
+    AnalysisPixelFormat pixelFormat = AnalysisPixelFormat::Jpeg;
+    quint32 slotIndex = 0;
+    quint64 sequence = 0;
+    quint32 payloadBytes = 0;
+};
+
 struct AnalysisChannelStatus {
     QString cameraId;
     bool enabled = false;
@@ -84,5 +96,6 @@ struct FallClassificationBatch {
 };
 
 Q_DECLARE_METATYPE(AnalysisFramePacket)
+Q_DECLARE_METATYPE(AnalysisFrameDescriptor)
 Q_DECLARE_METATYPE(FallClassificationResult)
 Q_DECLARE_METATYPE(FallClassificationBatch)

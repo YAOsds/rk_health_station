@@ -61,16 +61,42 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
     , trackTraceLogger_(config_.trackTracePath)
     , latencyMarkerWriter_(std::make_unique<LatencyMarkerWriter>(
           qEnvironmentVariable(kFallLatencyMarkerEnvVar)))
-    , ingestClient_(new AnalysisStreamClient(config_.analysisSocketPath, this))
+    , ingestClient_(new AnalysisStreamClient(
+          config_.analysisSocketPath, config_.analysisSharedMemoryName, this))
     , gateway_(new FallGateway(FallRuntimeStatus(), this)) {
+    const auto syncErrorLog = [this]() {
+        if (runtimeStatus_.lastError == lastLoggedError_) {
+            return;
+        }
+        if (runtimeStatus_.lastError.isEmpty()) {
+            if (!lastLoggedError_.isEmpty()) {
+                qInfo().noquote()
+                    << QStringLiteral("fall_runtime camera=%1 event=error_cleared")
+                           .arg(config_.cameraId);
+            }
+        } else {
+            qWarning().noquote()
+                << QStringLiteral("fall_runtime camera=%1 event=error error=%2")
+                       .arg(config_.cameraId)
+                       .arg(runtimeStatus_.lastError);
+        }
+        lastLoggedError_ = runtimeStatus_.lastError;
+    };
+
     connect(ingestClient_, &AnalysisStreamClient::statusChanged, this, [this](bool connected) {
         runtimeStatus_.inputConnected = connected;
+        qInfo().noquote()
+            << QStringLiteral("fall_runtime camera=%1 event=input_connected connected=%2")
+                   .arg(config_.cameraId)
+                   .arg(connected ? 1 : 0);
         gateway_->setRuntimeStatus(runtimeStatus_);
     });
     connect(ingestClient_, &AnalysisStreamClient::frameReceived, this,
-        [this](const AnalysisFramePacket &frame) {
+        [this, syncErrorLog](const AnalysisFramePacket &frame) {
             QString error;
-            runtimeStatus_.lastFrameTs = QDateTime::currentMSecsSinceEpoch();
+            const qint64 frameStartMs = QDateTime::currentMSecsSinceEpoch();
+            runtimeStatus_.lastFrameTs = frameStartMs;
+            logStats_.onFrameIngested(frameStartMs);
             if (latencyMarkerWriter_ && !firstFrameMarkerWritten_) {
                 const QString pixelFormat = frame.pixelFormat == AnalysisPixelFormat::Nv12
                     ? QStringLiteral("nv12")
@@ -88,11 +114,37 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
             }
             const QVector<PosePerson> people = poseEstimator_->infer(frame, &error);
             runtimeStatus_.lastInferTs = QDateTime::currentMSecsSinceEpoch();
+            const auto finalizeFrame = [this, frameStartMs, syncErrorLog](
+                                           bool hasPeople, bool nonEmptyBatch) {
+                logStats_.onInferenceComplete(
+                    runtimeStatus_.lastInferTs, hasPeople, nonEmptyBatch,
+                    runtimeStatus_.lastInferTs - frameStartMs);
+                if (const auto summary = logStats_.takeSummaryIfDue(
+                        config_.cameraId, runtimeStatus_.latestState, runtimeStatus_.latestConfidence,
+                        runtimeStatus_.lastError, runtimeStatus_.lastInferTs)) {
+                    runtimeStatus_.currentFps = summary->inferFps;
+                    qInfo().noquote()
+                        << QStringLiteral(
+                               "fall_perf camera=%1 ingest_fps=%2 infer_fps=%3 avg_infer_ms=%4 people_frames=%5 empty_frames=%6 nonempty_batches=%7 state=%8 conf=%9 error=%10")
+                               .arg(summary->cameraId)
+                               .arg(QString::number(summary->ingestFps, 'f', 1))
+                               .arg(QString::number(summary->inferFps, 'f', 1))
+                               .arg(QString::number(summary->avgInferMs, 'f', 1))
+                               .arg(summary->peopleFrames)
+                               .arg(summary->emptyFrames)
+                               .arg(summary->nonEmptyBatchCount)
+                               .arg(summary->latestState)
+                               .arg(QString::number(summary->latestConfidence, 'f', 2))
+                               .arg(summary->latestError);
+                }
+                syncErrorLog();
+            };
             if (!error.isEmpty()) {
                 tracker_.clear();
                 runtimeStatus_.lastError = error;
                 runtimeStatus_.latestState = QStringLiteral("monitoring");
                 runtimeStatus_.latestConfidence = 0.0;
+                finalizeFrame(false, false);
                 gateway_->setRuntimeStatus(runtimeStatus_);
                 return;
             }
@@ -113,6 +165,7 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                 gateway_->publishClassificationBatch(batch);
                 trackTraceLogger_.appendFrame(
                     frame, runtimeStatus_.lastInferTs, config_.cameraId, tracks, {});
+                finalizeFrame(false, false);
                 gateway_->setRuntimeStatus(runtimeStatus_);
                 return;
             }
@@ -196,12 +249,18 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                 classification.state = batch.results.first().state;
                 classification.confidence = batch.results.first().confidence;
                 gateway_->publishClassification(classification);
-                qInfo().noquote()
-                    << QStringLiteral("classification camera=%1 state=%2 confidence=%3 ts=%4")
-                           .arg(classification.cameraId)
-                           .arg(classification.state)
-                           .arg(QString::number(classification.confidence, 'f', 3))
-                           .arg(classification.timestampMs);
+                const bool alertState = classification.state == QStringLiteral("fall")
+                    || classification.state == QStringLiteral("lie");
+                const bool stateChanged = classification.state != lastLoggedState_;
+                if (alertState || stateChanged) {
+                    qInfo().noquote()
+                        << QStringLiteral("classification camera=%1 state=%2 confidence=%3 ts=%4")
+                               .arg(classification.cameraId)
+                               .arg(classification.state)
+                               .arg(QString::number(classification.confidence, 'f', 3))
+                               .arg(classification.timestampMs);
+                    lastLoggedState_ = classification.state;
+                }
             }
 
             if (!batch.results.isEmpty()) {
@@ -215,24 +274,36 @@ FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObje
                             {QStringLiteral("confidence"), batch.results.first().confidence},
                         });
                     firstClassificationMarkerWritten_ = true;
+                    qInfo().noquote()
+                        << QStringLiteral(
+                               "fall_runtime camera=%1 event=first_classification state=%2 confidence=%3 ts=%4")
+                               .arg(batch.cameraId)
+                               .arg(batch.results.first().state)
+                               .arg(QString::number(batch.results.first().confidence, 'f', 3))
+                               .arg(batch.timestampMs);
                 }
-                QStringList states;
-                for (const FallClassificationEntry &entry : batch.results) {
-                    states.push_back(QStringLiteral("%1:%2")
-                                         .arg(entry.state)
-                                         .arg(QString::number(entry.confidence, 'f', 2)));
+                const bool alertState = highestState == QStringLiteral("fall")
+                    || highestState == QStringLiteral("lie");
+                if (alertState) {
+                    QStringList states;
+                    for (const FallClassificationEntry &entry : batch.results) {
+                        states.push_back(QStringLiteral("%1:%2")
+                                             .arg(entry.state)
+                                             .arg(QString::number(entry.confidence, 'f', 2)));
+                    }
+                    qInfo().noquote()
+                        << QStringLiteral("classification_batch camera=%1 count=%2 states=[%3] ts=%4")
+                               .arg(batch.cameraId)
+                               .arg(batch.results.size())
+                               .arg(states.join(','))
+                               .arg(batch.timestampMs);
                 }
-                qInfo().noquote()
-                    << QStringLiteral("classification_batch camera=%1 count=%2 states=[%3] ts=%4")
-                           .arg(batch.cameraId)
-                           .arg(batch.results.size())
-                           .arg(states.join(','))
-                           .arg(batch.timestampMs);
             }
 
             trackTraceLogger_.appendFrame(
                 frame, runtimeStatus_.lastInferTs, config_.cameraId, tracks, traceEvents);
 
+            finalizeFrame(true, !batch.results.isEmpty());
             gateway_->setRuntimeStatus(runtimeStatus_);
         });
 }
@@ -242,20 +313,40 @@ bool FallDaemonApp::start() {
     runtimeStatus_.inputConnected = false;
     QString error;
     runtimeStatus_.poseModelReady = poseEstimator_->loadModel(config_.poseModelPath, &error);
+    qInfo().noquote()
+        << QStringLiteral("fall_runtime camera=%1 event=pose_model_loaded path=%2 ready=%3")
+               .arg(config_.cameraId)
+               .arg(config_.poseModelPath)
+               .arg(runtimeStatus_.poseModelReady ? 1 : 0);
     if (!runtimeStatus_.poseModelReady) {
         runtimeStatus_.lastError = error;
     }
     error.clear();
     runtimeStatus_.actionModelReady = actionClassifier_->loadModel(actionModelPathForConfig(config_), &error);
+    qInfo().noquote()
+        << QStringLiteral("fall_runtime camera=%1 event=action_model_loaded path=%2 ready=%3")
+               .arg(config_.cameraId)
+               .arg(actionModelPathForConfig(config_))
+               .arg(runtimeStatus_.actionModelReady ? 1 : 0);
     if (!runtimeStatus_.actionModelReady) {
         runtimeStatus_.lastError = error;
     }
     runtimeStatus_.latestState = QStringLiteral("monitoring");
+    if (!runtimeStatus_.lastError.isEmpty()) {
+        qWarning().noquote()
+            << QStringLiteral("fall_runtime camera=%1 event=error error=%2")
+                   .arg(config_.cameraId)
+                   .arg(runtimeStatus_.lastError);
+        lastLoggedError_ = runtimeStatus_.lastError;
+    }
     gateway_->setSocketName(config_.socketName);
     gateway_->setRuntimeStatus(runtimeStatus_);
     const bool started = gateway_->start();
     if (started) {
         ingestClient_->start();
+    } else {
+        qWarning().noquote()
+            << QStringLiteral("fall_runtime camera=%1 event=start_failed").arg(config_.cameraId);
     }
     return started;
 }

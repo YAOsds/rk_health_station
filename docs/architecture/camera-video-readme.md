@@ -125,7 +125,7 @@ tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview
 gst-launch-1.0 -e \
   v4l2src device=/dev/video11 ! \
   video/x-raw,format=NV12,width=640,height=480,framerate=30/1 ! \
-  jpegenc ! \
+  mppjpegenc rc-mode=fixqp q-factor=95 ! \
   multipartmux boundary=rkpreview ! \
   tcpserversink host=127.0.0.1 port=5602
 ```
@@ -238,7 +238,7 @@ UI 侧预览消费者做的事情：
 gst-launch-1.0 -e \
   v4l2src device=/dev/video11 ! \
   video/x-raw,format=NV12,width=640,height=480,framerate=30/1 ! \
-  jpegenc ! \
+  mppjpegenc rc-mode=fixqp q-factor=95 ! \
   multipartmux boundary=rkpreview ! \
   tcpserversink host=127.0.0.1 port=5602
 ```
@@ -253,7 +253,7 @@ gst-launch-1.0 -e \
 
 #### 阶段 B：在后端做预览编码和封装
 
-采集到的 `NV12` 原始帧先经过 `jpegenc` 变成 JPEG 帧，再由 `multipartmux` 封装成 multipart 流。
+采集到的 `NV12` 原始帧先经过 `mppjpegenc rc-mode=fixqp q-factor=95` 变成 JPEG 帧，再由 `multipartmux` 封装成 multipart 流。
 
 这里的“推流”并不是 RTSP/RTMP 那种媒体服务器模型，而是更轻量的本地 TCP 推送：
 
@@ -401,8 +401,8 @@ gst-launch-1.0 -e \
   v4l2src device=/dev/video11 ! \
   video/x-raw,format=NV12,width=1280,height=720,framerate=30/1 ! \
   tee name=t \
-  t. ! queue ! videoscale ! video/x-raw,width=640,height=480 ! \
-  jpegenc ! multipartmux boundary=rkpreview ! \
+  t. ! queue ! videoscale ! video/x-raw,format=NV12,width=640,height=480 ! \
+  mppjpegenc rc-mode=fixqp q-factor=95 ! multipartmux boundary=rkpreview ! \
   tcpserversink host=127.0.0.1 port=5602 \
   t. ! queue ! mpph264enc ! h264parse ! qtmux ! filesink location=<record_path>
 ```
@@ -411,7 +411,7 @@ gst-launch-1.0 -e \
 
 - 一路用于预览：
   - `videoscale` 把录像输入缩到预览分辨率
-  - `jpegenc` 编成 JPEG
+  - `mppjpegenc rc-mode=fixqp q-factor=95` 编成 JPEG
   - `multipartmux + tcpserversink` 继续给 UI 输出 MJPEG
 - 一路用于录像：
   - `mpph264enc` 做 H.264 编码
@@ -442,7 +442,7 @@ gst-launch-1.0 -e \
 - 采集：
   - `v4l2src` 从 `/dev/video11` 读取原始视频帧
 - 预览编码：
-  - `jpegenc` 把原始帧编码成 JPEG
+  - `mppjpegenc rc-mode=fixqp q-factor=95` 把原始帧编码成 JPEG
 - 预览推流：
   - `multipartmux + tcpserversink` 把 JPEG 帧连续输出为本地 TCP MJPEG 流
 - UI 预览解码：

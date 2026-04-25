@@ -33,6 +33,7 @@ private slots:
     void forwardsRgbFramesToAnalysisSource();
     void usesBurstTolerantSharedMemoryRingSize();
     void capsAnalysisTapRateAtStableBaselineFps();
+    void usesHardwareJpegEncoderForRecordingPreviewBranch();
 };
 
 void GstreamerVideoPipelineBackendTest::rejectsPipelineThatExitsDuringPreviewStartup() {
@@ -106,6 +107,11 @@ void GstreamerVideoPipelineBackendTest::returnsTcpMjpegPreviewUrlForRunningPrevi
     QFile captured(capturePath);
     QVERIFY(captured.open(QIODevice::ReadOnly | QIODevice::Text));
     const QString arguments = QString::fromUtf8(captured.readAll());
+    QVERIFY(arguments.contains(QStringLiteral("video/x-raw,format=NV12")));
+    QVERIFY(arguments.contains(QStringLiteral("mppjpegenc")));
+    QVERIFY(arguments.contains(QStringLiteral("rc-mode=fixqp")));
+    QVERIFY(arguments.contains(QStringLiteral("q-factor=95")));
+    QVERIFY(!arguments.contains(QStringLiteral(" ! jpegenc ! ")));
     QVERIFY(arguments.contains(QStringLiteral("multipartmux")));
     QVERIFY(arguments.contains(QStringLiteral("tcpserversink")));
 
@@ -150,6 +156,11 @@ void GstreamerVideoPipelineBackendTest::usesGenericFileDecodePipelineForTestInpu
     const QString arguments = QString::fromUtf8(captured.readAll());
     QVERIFY(arguments.contains(QStringLiteral("decodebin")));
     QVERIFY(arguments.contains(QStringLiteral("name=dec")));
+    QVERIFY(arguments.contains(QStringLiteral("video/x-raw,format=NV12")));
+    QVERIFY(arguments.contains(QStringLiteral("mppjpegenc")));
+    QVERIFY(arguments.contains(QStringLiteral("rc-mode=fixqp")));
+    QVERIFY(arguments.contains(QStringLiteral("q-factor=95")));
+    QVERIFY(!arguments.contains(QStringLiteral(" ! jpegenc ! ")));
     QVERIFY(arguments.contains(QStringLiteral("audioconvert")));
     QVERIFY(!arguments.contains(QStringLiteral("qtdemux")));
 
@@ -292,7 +303,10 @@ void GstreamerVideoPipelineBackendTest::capsAnalysisTapRateAtStableBaselineFps()
     QVERIFY(arguments.contains(QStringLiteral("videoconvert")));
     QVERIFY(arguments.contains(QStringLiteral("videoscale")));
     QVERIFY(arguments.contains(QStringLiteral("video/x-raw,format=RGB")));
-    QVERIFY(arguments.contains(QStringLiteral("jpegenc")));
+    QVERIFY(arguments.contains(QStringLiteral("mppjpegenc")));
+    QVERIFY(arguments.contains(QStringLiteral("rc-mode=fixqp")));
+    QVERIFY(arguments.contains(QStringLiteral("q-factor=95")));
+    QVERIFY(!arguments.contains(QStringLiteral(" ! jpegenc ! ")));
     QVERIFY(arguments.contains(QStringLiteral("multipartmux")));
     QVERIFY(arguments.contains(QStringLiteral("videorate")));
     QVERIFY(arguments.contains(QStringLiteral("drop-only=true")));
@@ -300,6 +314,58 @@ void GstreamerVideoPipelineBackendTest::capsAnalysisTapRateAtStableBaselineFps()
     QVERIFY(arguments.contains(QStringLiteral("fd=1")));
     QVERIFY(arguments.contains(QStringLiteral("framerate=15/1")));
     QVERIFY(!arguments.contains(QStringLiteral("framerate=10/1")));
+
+    qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
+}
+
+void GstreamerVideoPipelineBackendTest::usesHardwareJpegEncoderForRecordingPreviewBranch() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString capturePath = tempDir.filePath(QStringLiteral("launcher-args.txt"));
+    const QString launcherPath = tempDir.filePath(QStringLiteral("fake-gst-launch.sh"));
+    QFile launcher(launcherPath);
+    QVERIFY(launcher.open(QIODevice::WriteOnly | QIODevice::Text));
+    launcher.write(QStringLiteral(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$@\" > '%1'\n"
+        "sleep 2\n")
+            .arg(capturePath)
+            .toUtf8());
+    launcher.close();
+    QVERIFY(QFile::setPermissions(launcherPath,
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+    qputenv("RK_VIDEO_GST_LAUNCH_BIN", launcherPath.toUtf8());
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    status.previewProfile.fps = 30;
+    status.previewProfile.pixelFormat = QStringLiteral("NV12");
+    status.recordProfile.width = 1280;
+    status.recordProfile.height = 720;
+    status.recordProfile.fps = 30;
+    status.recordProfile.pixelFormat = QStringLiteral("NV12");
+
+    GstreamerVideoPipelineBackend backend;
+    QString error;
+    QVERIFY(backend.startRecording(status, tempDir.filePath(QStringLiteral("record.mp4")), &error));
+    QVERIFY(QFile::exists(capturePath));
+
+    QFile captured(capturePath);
+    QVERIFY(captured.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString arguments = QString::fromUtf8(captured.readAll());
+    QVERIFY(arguments.contains(QStringLiteral("mppjpegenc")));
+    QVERIFY(arguments.contains(QStringLiteral("rc-mode=fixqp")));
+    QVERIFY(arguments.contains(QStringLiteral("q-factor=95")));
+    QVERIFY(!arguments.contains(QStringLiteral(" ! jpegenc ! ")));
+    QVERIFY(arguments.contains(QStringLiteral("video/x-raw,format=NV12,width=640,height=480")));
+    QVERIFY(arguments.contains(QStringLiteral("mpph264enc")));
+    QVERIFY(arguments.contains(QStringLiteral("multipartmux")));
+    QVERIFY(arguments.contains(QStringLiteral("tcpserversink")));
 
     qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
 }

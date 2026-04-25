@@ -17,6 +17,7 @@ const int kStableAnalysisTapFps = 15;
 const int kAnalysisOutputWidth = 640;
 const int kAnalysisOutputHeight = 640;
 const quint16 kAnalysisRingSlotCount = 32;
+const int kPreviewJpegQuality = 95;
 const char kGstLaunchEnvVar[] = "RK_VIDEO_GST_LAUNCH_BIN";
 const char kDefaultGstLaunchBinary[] = "gst-launch-1.0";
 const char kVideoLatencyMarkerEnvVar[] = "RK_VIDEO_LATENCY_MARKER_PATH";
@@ -129,13 +130,14 @@ QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelSta
                 "%1 -q -e filesrc location=%2 ! decodebin name=dec "
                 "dec. ! queue ! videoconvert ! videoscale ! "
                 "video/x-raw,format=NV12,width=%3,height=%4 ! tee name=t "
-                "t. ! queue ! jpegenc ! multipartmux boundary=%5 ! "
-                "tcpserversink host=127.0.0.1 port=%6%7 "
+                "t. ! queue ! mppjpegenc rc-mode=fixqp q-factor=%5 ! multipartmux boundary=%6 ! "
+                "tcpserversink host=127.0.0.1 port=%7%8 "
                 "dec. ! queue ! audioconvert ! audioresample ! fakesink sync=false")
                 .arg(shellQuote(gstLaunchBinary()))
                 .arg(shellQuote(status.testFilePath))
                 .arg(status.previewProfile.width)
                 .arg(status.previewProfile.height)
+                .arg(kPreviewJpegQuality)
                 .arg(previewBoundaryForCamera(status.cameraId))
                 .arg(previewPortForCamera(status.cameraId))
                 .arg(analysisTap);
@@ -144,13 +146,14 @@ QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelSta
         return QStringLiteral(
             "%1 -q -e filesrc location=%2 ! decodebin name=dec "
             "dec. ! queue ! videoconvert ! videoscale ! "
-            "video/x-raw,width=%3,height=%4 ! jpegenc ! multipartmux boundary=%5 ! "
-            "tcpserversink host=127.0.0.1 port=%6 "
+            "video/x-raw,format=NV12,width=%3,height=%4 ! mppjpegenc rc-mode=fixqp q-factor=%5 ! multipartmux boundary=%6 ! "
+            "tcpserversink host=127.0.0.1 port=%7 "
             "dec. ! queue ! audioconvert ! audioresample ! fakesink sync=false")
             .arg(shellQuote(gstLaunchBinary()))
             .arg(shellQuote(status.testFilePath))
             .arg(status.previewProfile.width)
             .arg(status.previewProfile.height)
+            .arg(kPreviewJpegQuality)
             .arg(previewBoundaryForCamera(status.cameraId))
             .arg(previewPortForCamera(status.cameraId));
     }
@@ -160,14 +163,15 @@ QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelSta
             "%1 -q -e v4l2src device=%2 ! "
             "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
             "tee name=t "
-            "t. ! queue ! jpegenc ! multipartmux boundary=%7 ! "
-            "tcpserversink host=127.0.0.1 port=%8%9")
+            "t. ! queue ! mppjpegenc rc-mode=fixqp q-factor=%7 ! multipartmux boundary=%8 ! "
+            "tcpserversink host=127.0.0.1 port=%9%10")
             .arg(shellQuote(gstLaunchBinary()))
             .arg(shellQuote(status.devicePath))
             .arg(status.previewProfile.pixelFormat)
             .arg(status.previewProfile.width)
             .arg(status.previewProfile.height)
             .arg(status.previewProfile.fps > 0 ? status.previewProfile.fps : 30)
+            .arg(kPreviewJpegQuality)
             .arg(previewBoundaryForCamera(status.cameraId))
             .arg(previewPortForCamera(status.cameraId))
             .arg(analysisTap);
@@ -176,14 +180,15 @@ QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelSta
     return QStringLiteral(
         "%1 -q -e v4l2src device=%2 ! "
         "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
-        "jpegenc ! multipartmux boundary=%7 ! "
-        "tcpserversink host=127.0.0.1 port=%8")
+        "mppjpegenc rc-mode=fixqp q-factor=%7 ! multipartmux boundary=%8 ! "
+        "tcpserversink host=127.0.0.1 port=%9")
         .arg(shellQuote(gstLaunchBinary()))
         .arg(shellQuote(status.devicePath))
         .arg(status.previewProfile.pixelFormat)
         .arg(status.previewProfile.width)
         .arg(status.previewProfile.height)
         .arg(status.previewProfile.fps > 0 ? status.previewProfile.fps : 30)
+        .arg(kPreviewJpegQuality)
         .arg(previewBoundaryForCamera(status.cameraId))
         .arg(previewPortForCamera(status.cameraId));
 }
@@ -195,10 +200,10 @@ QString GstreamerVideoPipelineBackend::buildRecordingCommand(
         "%1 -q -e v4l2src device=%2 ! "
         "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
         "tee name=t "
-        "t. ! queue ! videoscale ! video/x-raw,width=%7,height=%8 ! "
-        "jpegenc ! multipartmux boundary=%9 ! "
-        "tcpserversink host=127.0.0.1 port=%10%11 "
-        "t. ! queue ! mpph264enc ! h264parse ! qtmux ! filesink location=%12")
+        "t. ! queue ! videoscale ! video/x-raw,format=NV12,width=%7,height=%8 ! "
+        "mppjpegenc rc-mode=fixqp q-factor=%9 ! multipartmux boundary=%10 ! "
+        "tcpserversink host=127.0.0.1 port=%11%12 "
+        "t. ! queue ! mpph264enc ! h264parse ! qtmux ! filesink location=%13")
         .arg(shellQuote(gstLaunchBinary()))
         .arg(shellQuote(status.devicePath))
         .arg(status.recordProfile.pixelFormat)
@@ -207,6 +212,7 @@ QString GstreamerVideoPipelineBackend::buildRecordingCommand(
         .arg(status.recordProfile.fps > 0 ? status.recordProfile.fps : 30)
         .arg(status.previewProfile.width)
         .arg(status.previewProfile.height)
+        .arg(kPreviewJpegQuality)
         .arg(previewBoundaryForCamera(status.cameraId))
         .arg(previewPortForCamera(status.cameraId))
         .arg(analysisTap)

@@ -574,6 +574,7 @@ add_executable(video_service_test
     video_daemon_tests/video_service_test.cpp
     ../health_videod/analysis/gstreamer_analysis_output_backend.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_videod/analysis/rga_frame_converter.cpp
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
     ../health_videod/debug/video_runtime_log_stats.cpp
@@ -623,6 +624,7 @@ add_executable(video_service_analysis_test
     video_daemon_tests/video_service_analysis_test.cpp
     ../health_videod/analysis/gstreamer_analysis_output_backend.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_videod/analysis/rga_frame_converter.cpp
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
     ../health_videod/debug/video_runtime_log_stats.cpp
@@ -671,6 +673,7 @@ add_executable(gstreamer_video_pipeline_backend_test
     video_daemon_tests/gstreamer_video_pipeline_backend_test.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_videod/analysis/rga_frame_converter.cpp
     ../health_videod/debug/video_runtime_log_stats.cpp
 )
 
@@ -735,6 +738,7 @@ add_executable(video_gateway_test
     ipc_tests/video_gateway_test.cpp
     ../health_videod/analysis/gstreamer_analysis_output_backend.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_videod/analysis/rga_frame_converter.cpp
     ../health_videod/ipc/video_gateway.cpp
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
@@ -1251,3 +1255,26 @@ target_link_libraries(fall_end_to_end_status_test PRIVATE
 )
 
 add_test(NAME fall_end_to_end_status_test COMMAND fall_end_to_end_status_test)
+
+
+foreach(RK_VIDEOD_RGA_TEST_TARGET
+        video_service_test
+        video_service_analysis_test
+        gstreamer_video_pipeline_backend_test
+        video_gateway_test)
+    target_compile_definitions(${RK_VIDEOD_RGA_TEST_TARGET} PRIVATE
+        RKAPP_ENABLE_RGA_ANALYSIS_CONVERT=$<IF:$<BOOL:${RKAPP_ENABLE_RGA_ANALYSIS_CONVERT}>,1,0>
+    )
+endforeach()
+
+if(RKAPP_ENABLE_RGA_ANALYSIS_CONVERT)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBRGA REQUIRED IMPORTED_TARGET librga)
+    foreach(RK_VIDEOD_RGA_TEST_TARGET
+            video_service_test
+            video_service_analysis_test
+            gstreamer_video_pipeline_backend_test
+            video_gateway_test)
+        target_link_libraries(${RK_VIDEOD_RGA_TEST_TARGET} PRIVATE PkgConfig::LIBRGA)
+    endforeach()
+endif()

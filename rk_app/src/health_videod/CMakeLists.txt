@@ -19,6 +19,9 @@ add_executable(health-videod
     analysis/analysis_output_backend.h
     analysis/shared_memory_frame_ring.cpp
     analysis/shared_memory_frame_ring.h
+    analysis/analysis_frame_converter.h
+    analysis/rga_frame_converter.cpp
+    analysis/rga_frame_converter.h
     core/video_service.cpp
     core/video_service.h
     core/video_storage_service.cpp
@@ -45,3 +48,14 @@ target_link_libraries(health-videod PRIVATE
     ${RK_QT_CORE_TARGET}
     ${RK_QT_NETWORK_TARGET}
 )
+
+
+target_compile_definitions(health-videod PRIVATE
+    RKAPP_ENABLE_RGA_ANALYSIS_CONVERT=$<IF:$<BOOL:${RKAPP_ENABLE_RGA_ANALYSIS_CONVERT}>,1,0>
+)
+
+if(RKAPP_ENABLE_RGA_ANALYSIS_CONVERT)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBRGA REQUIRED IMPORTED_TARGET librga)
+    target_link_libraries(health-videod PRIVATE PkgConfig::LIBRGA)
+endif()

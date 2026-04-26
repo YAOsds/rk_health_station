@@ -17,6 +17,8 @@ endif()
 
 include(CTest)
 
+option(RKAPP_ENABLE_RGA_ANALYSIS_CONVERT "Use RK RGA for analysis NV12 to RGB conversion" OFF)
+
 if(BUILD_TESTING)
     if(RK_QT_MAJOR EQUAL 6)
         find_package(Qt6 REQUIRED COMPONENTS Test)

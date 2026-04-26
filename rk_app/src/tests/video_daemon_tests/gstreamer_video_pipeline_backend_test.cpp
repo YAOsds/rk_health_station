@@ -23,18 +23,55 @@ public:
     QVector<AnalysisFrameDescriptor> descriptors;
 };
 
+
+class FillingAnalysisFrameConverter : public AnalysisFrameConverter {
+public:
+    bool convertNv12ToRgb(const QByteArray &nv12,
+        int srcWidth,
+        int srcHeight,
+        int dstWidth,
+        int dstHeight,
+        QByteArray *rgb,
+        QString *error) override {
+        Q_UNUSED(error);
+        calls++;
+        lastInputBytes = nv12.size();
+        lastSrcWidth = srcWidth;
+        lastSrcHeight = srcHeight;
+        lastDstWidth = dstWidth;
+        lastDstHeight = dstHeight;
+        rgb->fill('\x7f', dstWidth * dstHeight * 3);
+        return true;
+    }
+
+    int calls = 0;
+    int lastInputBytes = 0;
+    int lastSrcWidth = 0;
+    int lastSrcHeight = 0;
+    int lastDstWidth = 0;
+    int lastDstHeight = 0;
+};
+
 class GstreamerVideoPipelineBackendTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void cleanup();
     void rejectsPipelineThatExitsDuringPreviewStartup();
     void returnsTcpMjpegPreviewUrlForRunningPreview();
     void usesGenericFileDecodePipelineForTestInput();
     void forwardsRgbFramesToAnalysisSource();
     void usesBurstTolerantSharedMemoryRingSize();
     void capsAnalysisTapRateAtStableBaselineFps();
+    void usesRgaAnalysisTapWhenRequested();
+    void convertsRgaNv12FramesToRgbDescriptors();
     void usesHardwareJpegEncoderForRecordingPreviewBranch();
 };
+
+void GstreamerVideoPipelineBackendTest::cleanup() {
+    qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
+    qunsetenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND");
+}
 
 void GstreamerVideoPipelineBackendTest::rejectsPipelineThatExitsDuringPreviewStartup() {
     QTemporaryDir tempDir;
@@ -279,6 +316,7 @@ void GstreamerVideoPipelineBackendTest::capsAnalysisTapRateAtStableBaselineFps()
         QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
 
     qputenv("RK_VIDEO_GST_LAUNCH_BIN", launcherPath.toUtf8());
+    qunsetenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND");
 
     VideoChannelStatus status;
     status.cameraId = QStringLiteral("front_cam");
@@ -315,6 +353,110 @@ void GstreamerVideoPipelineBackendTest::capsAnalysisTapRateAtStableBaselineFps()
     QVERIFY(arguments.contains(QStringLiteral("framerate=15/1")));
     QVERIFY(!arguments.contains(QStringLiteral("framerate=10/1")));
 
+    qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
+}
+
+
+void GstreamerVideoPipelineBackendTest::usesRgaAnalysisTapWhenRequested() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString capturePath = tempDir.filePath(QStringLiteral("launcher-args.txt"));
+    const QString launcherPath = tempDir.filePath(QStringLiteral("fake-gst-launch.sh"));
+    QFile launcher(launcherPath);
+    QVERIFY(launcher.open(QIODevice::WriteOnly | QIODevice::Text));
+    launcher.write(QStringLiteral(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$@\" > '%1'\n"
+        "sleep 2\n")
+            .arg(capturePath)
+            .toUtf8());
+    launcher.close();
+    QVERIFY(QFile::setPermissions(launcherPath,
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+    qputenv("RK_VIDEO_GST_LAUNCH_BIN", launcherPath.toUtf8());
+    qputenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND", "rga");
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    status.previewProfile.fps = 30;
+    status.previewProfile.pixelFormat = QStringLiteral("NV12");
+
+    RecordingAnalysisFrameSource analysisSource;
+    GstreamerVideoPipelineBackend backend;
+    backend.setAnalysisFrameSource(&analysisSource);
+
+    QString previewUrl;
+    QString error;
+    QVERIFY(backend.startPreview(status, &previewUrl, &error));
+    QVERIFY(QFile::exists(capturePath));
+
+    QFile captured(capturePath);
+    QVERIFY(captured.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString arguments = QString::fromUtf8(captured.readAll());
+    QVERIFY(arguments.contains(QStringLiteral("video/x-raw,format=NV12,width=640,height=480,framerate=15/1")));
+    QVERIFY(!arguments.contains(QStringLiteral("videoconvert")));
+    QVERIFY(!arguments.contains(QStringLiteral("videoscale")));
+    QVERIFY(arguments.contains(QStringLiteral("fdsink")));
+    QVERIFY(arguments.contains(QStringLiteral("fd=1")));
+
+    qunsetenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND");
+    qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
+}
+
+
+void GstreamerVideoPipelineBackendTest::convertsRgaNv12FramesToRgbDescriptors() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString launcherPath = tempDir.filePath(QStringLiteral("fake-gst-launch.sh"));
+    QFile launcher(launcherPath);
+    QVERIFY(launcher.open(QIODevice::WriteOnly | QIODevice::Text));
+    launcher.write(
+        "#!/bin/sh\n"
+        "dd if=/dev/zero bs=460800 count=1 2>/dev/null\n"
+        "sleep 2\n");
+    launcher.close();
+    QVERIFY(QFile::setPermissions(launcherPath,
+        QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+    qputenv("RK_VIDEO_GST_LAUNCH_BIN", launcherPath.toUtf8());
+    qputenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND", "rga");
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    status.previewProfile.fps = 30;
+    status.previewProfile.pixelFormat = QStringLiteral("NV12");
+
+    RecordingAnalysisFrameSource analysisSource;
+    FillingAnalysisFrameConverter converter;
+    GstreamerVideoPipelineBackend backend;
+    backend.setAnalysisFrameSource(&analysisSource);
+    backend.setAnalysisFrameConverter(&converter);
+
+    QString previewUrl;
+    QString error;
+    QVERIFY(backend.startPreview(status, &previewUrl, &error));
+    QTRY_COMPARE_WITH_TIMEOUT(analysisSource.descriptors.size(), 1, 2000);
+    QCOMPARE(converter.calls, 1);
+    QCOMPARE(converter.lastInputBytes, 640 * 480 * 3 / 2);
+    QCOMPARE(converter.lastSrcWidth, 640);
+    QCOMPARE(converter.lastSrcHeight, 480);
+    QCOMPARE(converter.lastDstWidth, 640);
+    QCOMPARE(converter.lastDstHeight, 640);
+    QCOMPARE(analysisSource.descriptors.first().width, 640);
+    QCOMPARE(analysisSource.descriptors.first().height, 640);
+    QCOMPARE(analysisSource.descriptors.first().pixelFormat, AnalysisPixelFormat::Rgb);
+    QCOMPARE(analysisSource.descriptors.first().payloadBytes, 640u * 640u * 3u);
+
+    qunsetenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND");
     qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
 }
 

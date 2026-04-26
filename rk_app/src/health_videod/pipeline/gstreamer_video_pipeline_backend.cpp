@@ -21,6 +21,15 @@ const int kPreviewJpegQuality = 95;
 const char kGstLaunchEnvVar[] = "RK_VIDEO_GST_LAUNCH_BIN";
 const char kDefaultGstLaunchBinary[] = "gst-launch-1.0";
 const char kVideoLatencyMarkerEnvVar[] = "RK_VIDEO_LATENCY_MARKER_PATH";
+const char kAnalysisConvertBackendEnvVar[] = "RK_VIDEO_ANALYSIS_CONVERT_BACKEND";
+
+int nv12FrameBytes(int width, int height) {
+    return width > 0 && height > 0 ? width * height * 3 / 2 : 0;
+}
+
+int rgbFrameBytes(int width, int height) {
+    return width > 0 && height > 0 ? width * height * 3 : 0;
+}
 }
 
 GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend() = default;
@@ -37,12 +46,16 @@ void GstreamerVideoPipelineBackend::setAnalysisFrameSource(AnalysisFrameSource *
     analysisFrameSource_ = source;
 }
 
+void GstreamerVideoPipelineBackend::setAnalysisFrameConverter(AnalysisFrameConverter *converter) {
+    analysisFrameConverter_ = converter;
+}
+
 bool GstreamerVideoPipelineBackend::startPreview(
     const VideoChannelStatus &status, QString *previewUrl, QString *error) {
     const bool enableAnalysisTap = analysisTapEnabled(status);
+    const AnalysisConvertBackend backend = analysisConvertBackendForProfile(status.previewProfile);
     return startCommand(status.cameraId, buildPreviewCommand(status), false, previewUrl, error,
-        enableAnalysisTap ? kAnalysisOutputWidth : 0,
-        enableAnalysisTap ? kAnalysisOutputHeight : 0);
+        enableAnalysisTap ? status.previewProfile : VideoProfile(), backend);
 }
 
 bool GstreamerVideoPipelineBackend::stopPreview(const QString &cameraId, QString *error) {
@@ -58,10 +71,9 @@ bool GstreamerVideoPipelineBackend::startRecording(
     const VideoChannelStatus &status, const QString &outputPath, QString *error) {
     QString previewUrl;
     const bool enableAnalysisTap = analysisTapEnabled(status);
+    const AnalysisConvertBackend backend = analysisConvertBackendForProfile(status.recordProfile);
     return startCommand(status.cameraId, buildRecordingCommand(status, outputPath), true,
-        &previewUrl, error,
-        enableAnalysisTap ? kAnalysisOutputWidth : 0,
-        enableAnalysisTap ? kAnalysisOutputHeight : 0);
+        &previewUrl, error, enableAnalysisTap ? status.recordProfile : VideoProfile(), backend);
 }
 
 bool GstreamerVideoPipelineBackend::stopRecording(const QString &cameraId, QString *error) {
@@ -98,7 +110,7 @@ quint16 GstreamerVideoPipelineBackend::previewPortForCamera(const QString &camer
 }
 
 QString GstreamerVideoPipelineBackend::buildAnalysisTapCommandFragment(
-    const VideoChannelStatus &status) const {
+    const VideoChannelStatus &status, const VideoProfile &sourceProfile) const {
     if (!analysisTapEnabled(status)) {
         return QString();
     }
@@ -106,6 +118,17 @@ QString GstreamerVideoPipelineBackend::buildAnalysisTapCommandFragment(
     const int analysisTapFps = status.previewProfile.fps > 0
         ? qMin(status.previewProfile.fps, kStableAnalysisTapFps)
         : kStableAnalysisTapFps;
+
+    if (analysisConvertBackendForProfile(sourceProfile) == AnalysisConvertBackend::Rga) {
+        return QStringLiteral(
+            " t. ! queue leaky=downstream max-size-buffers=1 ! "
+            "videorate drop-only=true ! "
+            "video/x-raw,format=NV12,width=%1,height=%2,framerate=%3/1 ! "
+            "fdsink fd=1 sync=false")
+            .arg(sourceProfile.width)
+            .arg(sourceProfile.height)
+            .arg(analysisTapFps);
+    }
 
     return QStringLiteral(
         " t. ! queue leaky=downstream max-size-buffers=1 ! "
@@ -118,12 +141,32 @@ QString GstreamerVideoPipelineBackend::buildAnalysisTapCommandFragment(
         .arg(analysisTapFps);
 }
 
+GstreamerVideoPipelineBackend::AnalysisConvertBackend
+GstreamerVideoPipelineBackend::analysisConvertBackendForProfile(const VideoProfile &sourceProfile) const {
+    const QString requested = qEnvironmentVariable(kAnalysisConvertBackendEnvVar).trimmed().toLower();
+    if (requested == QStringLiteral("gstreamer_cpu") || requested == QStringLiteral("cpu")) {
+        return AnalysisConvertBackend::GstreamerCpu;
+    }
+    if (sourceProfile.pixelFormat.compare(QStringLiteral("NV12"), Qt::CaseInsensitive) != 0) {
+        return AnalysisConvertBackend::GstreamerCpu;
+    }
+    if (requested == QStringLiteral("rga")) {
+        return AnalysisConvertBackend::Rga;
+    }
+
+#if defined(RKAPP_ENABLE_RGA_ANALYSIS_CONVERT) && RKAPP_ENABLE_RGA_ANALYSIS_CONVERT
+    return AnalysisConvertBackend::Rga;
+#else
+    return AnalysisConvertBackend::GstreamerCpu;
+#endif
+}
+
 bool GstreamerVideoPipelineBackend::analysisTapEnabled(const VideoChannelStatus &status) const {
     return analysisFrameSource_ && analysisFrameSource_->acceptsFrames(status.cameraId);
 }
 
 QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelStatus &status) const {
-    const QString analysisTap = buildAnalysisTapCommandFragment(status);
+    const QString analysisTap = buildAnalysisTapCommandFragment(status, status.previewProfile);
     if (status.inputMode == QStringLiteral("test_file")) {
         if (!analysisTap.isEmpty()) {
             return QStringLiteral(
@@ -195,7 +238,7 @@ QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelSta
 
 QString GstreamerVideoPipelineBackend::buildRecordingCommand(
     const VideoChannelStatus &status, const QString &outputPath) const {
-    const QString analysisTap = buildAnalysisTapCommandFragment(status);
+    const QString analysisTap = buildAnalysisTapCommandFragment(status, status.recordProfile);
     return QStringLiteral(
         "%1 -q -e v4l2src device=%2 ! "
         "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
@@ -238,7 +281,7 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
     }
 
     ActivePipeline &pipeline = pipelines_[cameraId];
-    if (!pipeline.process || pipeline.analysisFrameBytes <= 0) {
+    if (!pipeline.process || pipeline.analysisInputFrameBytes <= 0) {
         if (pipeline.process) {
             pipeline.process->readAllStandardOutput();
         }
@@ -246,16 +289,50 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
     }
 
     pipeline.stdoutBuffer.append(pipeline.process->readAllStandardOutput());
-    while (pipeline.stdoutBuffer.size() >= pipeline.analysisFrameBytes) {
+    while (pipeline.stdoutBuffer.size() >= pipeline.analysisInputFrameBytes) {
+        const QByteArray inputFrame = pipeline.stdoutBuffer.left(pipeline.analysisInputFrameBytes);
+        pipeline.stdoutBuffer.remove(0, pipeline.analysisInputFrameBytes);
+
+        QByteArray rgbPayload;
+        if (pipeline.analysisConvertBackend == AnalysisConvertBackend::Rga) {
+            AnalysisFrameConverter *converter = analysisFrameConverter_
+                ? analysisFrameConverter_
+                : &defaultRgaFrameConverter_;
+            QString convertError;
+            if (!converter->convertNv12ToRgb(inputFrame,
+                    pipeline.analysisInputWidth,
+                    pipeline.analysisInputHeight,
+                    pipeline.analysisOutputWidth,
+                    pipeline.analysisOutputHeight,
+                    &rgbPayload,
+                    &convertError)) {
+                qWarning().noquote()
+                    << QStringLiteral("video_runtime camera=%1 event=analysis_convert_failed backend=rga error=%2")
+                           .arg(cameraId)
+                           .arg(convertError.isEmpty() ? QStringLiteral("unknown") : convertError);
+                continue;
+            }
+        } else {
+            rgbPayload = inputFrame;
+        }
+
+        if (rgbPayload.size() != pipeline.analysisOutputFrameBytes) {
+            qWarning().noquote()
+                << QStringLiteral("video_runtime camera=%1 event=analysis_frame_size_mismatch expected=%2 actual=%3")
+                       .arg(cameraId)
+                       .arg(pipeline.analysisOutputFrameBytes)
+                       .arg(rgbPayload.size());
+            continue;
+        }
+
         AnalysisFramePacket packet;
         packet.frameId = pipeline.nextFrameId++;
         packet.timestampMs = QDateTime::currentMSecsSinceEpoch();
         packet.cameraId = pipeline.cameraId;
-        packet.width = pipeline.analysisWidth;
-        packet.height = pipeline.analysisHeight;
+        packet.width = pipeline.analysisOutputWidth;
+        packet.height = pipeline.analysisOutputHeight;
         packet.pixelFormat = AnalysisPixelFormat::Rgb;
-        packet.payload = pipeline.stdoutBuffer.left(pipeline.analysisFrameBytes);
-        pipeline.stdoutBuffer.remove(0, pipeline.analysisFrameBytes);
+        packet.payload = rgbPayload;
 
         if (analysisFrameSource_ && analysisFrameSource_->acceptsFrames(packet.cameraId)
             && pipeline.frameRing) {
@@ -316,7 +393,8 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
 }
 
 bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const QString &command,
-    bool recording, QString *previewUrl, QString *error, int analysisWidth, int analysisHeight) {
+    bool recording, QString *previewUrl, QString *error, const VideoProfile &analysisInputProfile,
+    AnalysisConvertBackend analysisConvertBackend) {
     if (error) {
         error->clear();
     }
@@ -392,14 +470,21 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
     pipeline.testInput = command.contains(QStringLiteral("filesrc location="));
     pipeline.previewUrl = previewUrlForCamera(cameraId);
     pipeline.cameraId = cameraId;
-    pipeline.analysisWidth = analysisWidth;
-    pipeline.analysisHeight = analysisHeight;
-    pipeline.analysisFrameBytes = analysisWidth > 0 && analysisHeight > 0
-        ? analysisWidth * analysisHeight * 3
-        : 0;
-    if (pipeline.analysisFrameBytes > 0) {
+    pipeline.analysisConvertBackend = analysisConvertBackend;
+    pipeline.analysisInputWidth = analysisInputProfile.width;
+    pipeline.analysisInputHeight = analysisInputProfile.height;
+    pipeline.analysisInputFrameBytes = 0;
+    if (analysisInputProfile.width > 0 && analysisInputProfile.height > 0) {
+        pipeline.analysisInputFrameBytes = analysisConvertBackend == AnalysisConvertBackend::Rga
+            ? nv12FrameBytes(analysisInputProfile.width, analysisInputProfile.height)
+            : rgbFrameBytes(kAnalysisOutputWidth, kAnalysisOutputHeight);
+        pipeline.analysisOutputWidth = kAnalysisOutputWidth;
+        pipeline.analysisOutputHeight = kAnalysisOutputHeight;
+        pipeline.analysisOutputFrameBytes = rgbFrameBytes(kAnalysisOutputWidth, kAnalysisOutputHeight);
+    }
+    if (pipeline.analysisOutputFrameBytes > 0) {
         pipeline.frameRing = new SharedMemoryFrameRingWriter(
-            cameraId, kAnalysisRingSlotCount, static_cast<quint32>(pipeline.analysisFrameBytes));
+            cameraId, kAnalysisRingSlotCount, static_cast<quint32>(pipeline.analysisOutputFrameBytes));
         QString ringError;
         if (!pipeline.frameRing->initialize(&ringError)) {
             const QString finalError = ringError.isEmpty()
@@ -423,10 +508,15 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
     processAnalysisStdout(cameraId);
 
     qInfo().noquote()
-        << QStringLiteral("video_runtime camera=%1 event=preview_started mode=%2 analysis=%3")
+        << QStringLiteral("video_runtime camera=%1 event=preview_started mode=%2 analysis=%3 analysis_backend=%4")
                .arg(cameraId)
                .arg(pipeline.testInput ? QStringLiteral("test_file") : QStringLiteral("camera"))
-               .arg(pipeline.analysisFrameBytes > 0 ? 1 : 0);
+               .arg(pipeline.analysisOutputFrameBytes > 0 ? 1 : 0)
+               .arg(pipeline.analysisOutputFrameBytes <= 0
+                       ? QStringLiteral("off")
+                       : (pipeline.analysisConvertBackend == AnalysisConvertBackend::Rga
+                               ? QStringLiteral("rga")
+                               : QStringLiteral("gstreamer_cpu")));
 
     if (previewUrl) {
         *previewUrl = pipeline.previewUrl;

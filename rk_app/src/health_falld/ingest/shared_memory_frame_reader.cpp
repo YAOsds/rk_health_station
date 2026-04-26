@@ -121,9 +121,26 @@ bool SharedMemoryFrameReader::ensureMapped(const QString &cameraId, QString *err
         return false;
     }
 
+    if (mapBytes_ < static_cast<qsizetype>(sizeof(SharedFrameRingHeader))) {
+        if (error) {
+            *error = QStringLiteral("analysis_ring_invalid_header");
+        }
+        cleanup();
+        return false;
+    }
+
     header_ = static_cast<SharedFrameRingHeader *>(mapped_);
-    if (header_->magic != SharedFrameRingHeader().magic || header_->version != 1
-        || header_->slotCount == 0 || header_->slotStride == 0) {
+    const qsizetype minimumSlotStride = static_cast<qsizetype>(sizeof(SharedFrameSlotHeader));
+    const qsizetype declaredSlotStride = static_cast<qsizetype>(header_->slotStride);
+    const qsizetype declaredSlotCount = static_cast<qsizetype>(header_->slotCount);
+    const qsizetype declaredMaxFrameBytes = static_cast<qsizetype>(header_->maxFrameBytes);
+    const bool headerIsValid = header_->magic == SharedFrameRingHeader().magic
+        && header_->version == 1
+        && declaredSlotCount > 0
+        && declaredSlotStride >= minimumSlotStride
+        && declaredMaxFrameBytes <= declaredSlotStride - minimumSlotStride
+        && declaredSlotCount <= (mapBytes_ - static_cast<qsizetype>(sizeof(SharedFrameRingHeader))) / declaredSlotStride;
+    if (!headerIsValid) {
         if (error) {
             *error = QStringLiteral("analysis_ring_invalid_header");
         }

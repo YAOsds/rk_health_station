@@ -35,6 +35,7 @@ private slots:
     void emitsEveryPacketFromSingleReadBurst();
     void reconnectsAfterServerRestarts();
     void clearsPartialPacketBufferBeforeReconnect();
+    void dropsOversizedDescriptorBuffer();
 };
 
 void AnalysisStreamClientTest::decodesIncomingFramePackets() {
@@ -262,6 +263,29 @@ void AnalysisStreamClientTest::clearsPartialPacketBufferBeforeReconnect() {
     secondSocket->flush();
 
     QTRY_VERIFY_WITH_TIMEOUT(frameSpy.count() == 1, 3000);
+}
+
+void AnalysisStreamClientTest::dropsOversizedDescriptorBuffer() {
+    const QString socketName = QStringLiteral("/tmp/rk_video_analysis_oversized_test.sock");
+    QLocalServer::removeServer(socketName);
+
+    QLocalServer server;
+    QVERIFY(server.listen(socketName));
+
+    AnalysisStreamClient client(socketName);
+    QSignalSpy statusSpy(&client, SIGNAL(statusChanged(bool)));
+    client.start();
+
+    QVERIFY(server.waitForNewConnection(2000));
+    QLocalSocket *socket = server.nextPendingConnection();
+    QVERIFY(socket != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(!statusSpy.isEmpty(), 2000);
+
+    socket->write(QByteArray(1024 * 1024 + 1, 'x'));
+    socket->flush();
+
+    QTRY_VERIFY_WITH_TIMEOUT(socket->state() == QLocalSocket::UnconnectedState, 3000);
+    delete socket;
 }
 
 QTEST_MAIN(AnalysisStreamClientTest)

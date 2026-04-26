@@ -17,6 +17,7 @@ namespace {
 const char kSocketName[] = "rk_health_station.sock";
 const char kSocketEnvVar[] = "RK_HEALTH_STATION_SOCKET_NAME";
 const char kLineSeparator = '\n';
+constexpr int kMaxBufferedBytes = 1024 * 1024;
 }
 
 QByteArray IpcCodec::encode(const IpcMessage &message) {
@@ -71,6 +72,7 @@ UiGateway::~UiGateway() {
 bool UiGateway::start() {
     stop();
     QLocalServer::removeServer(socketName());
+    server_->setSocketOptions(QLocalServer::UserAccessOption);
     const bool ok = server_->listen(socketName());
     if (!ok) {
         qWarning() << "ui gateway listen failed:" << server_->errorString();
@@ -123,6 +125,12 @@ void UiGateway::onSocketReadyRead() {
 
     QByteArray &buffer = readBuffers_[socket];
     buffer.append(socket->readAll());
+    if (buffer.size() > kMaxBufferedBytes) {
+        qWarning() << "healthd ipc: request buffer exceeded limit" << buffer.size();
+        readBuffers_.remove(socket);
+        socket->disconnectFromServer();
+        return;
+    }
 
     int separatorIndex = buffer.indexOf(kLineSeparator);
     while (separatorIndex >= 0) {

@@ -12,13 +12,25 @@ VIDEO_ANALYSIS_SOCKET_PATH=${RK_VIDEO_ANALYSIS_SOCKET_PATH:-${RUN_DIR}/rk_video_
 FALL_SOCKET_PATH=${RK_FALL_SOCKET_NAME:-${RUN_DIR}/rk_fall.sock}
 DB_PATH=${HEALTHD_DB_PATH:-${DATA_DIR}/healthd.sqlite}
 
+valid_pid() {
+  local pid=$1
+  [[ "${pid}" =~ ^[0-9]+$ ]] && (( pid > 0 ))
+}
+
+pid_started_from_bundle() {
+  local pid=$1
+  local cwd
+  cwd=$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)
+  [[ "${cwd}" == "${BUNDLE_ROOT}" ]]
+}
+
 show_state() {
   local name=$1
   local pid_file=$2
   if [[ -f "${pid_file}" ]]; then
     local pid
     pid=$(cat "${pid_file}")
-    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+    if valid_pid "${pid}" && kill -0 "${pid}" 2>/dev/null && pid_started_from_bundle "${pid}"; then
       echo "${name}: running (pid ${pid})"
       return
     fi

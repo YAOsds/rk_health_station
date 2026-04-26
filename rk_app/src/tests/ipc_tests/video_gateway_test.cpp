@@ -56,6 +56,7 @@ class VideoGatewayTest : public QObject {
 private slots:
     void returnsStatusForGetStatus();
     void routesStartTestInputCommand();
+    void dropsOversizedFrameBuffer();
 };
 
 void VideoGatewayTest::returnsStatusForGetStatus() {
@@ -117,6 +118,26 @@ void VideoGatewayTest::routesStartTestInputCommand() {
     QVERIFY(videoCommandResultFromJson(document.object(), &result));
     QVERIFY(result.ok);
     QCOMPARE(result.action, QStringLiteral("start_test_input"));
+
+    gateway.stop();
+    qunsetenv("RK_VIDEO_SOCKET_NAME");
+}
+
+void VideoGatewayTest::dropsOversizedFrameBuffer() {
+    qputenv("RK_VIDEO_SOCKET_NAME", QByteArray("/tmp/rk_video_gateway_oversized_test.sock"));
+
+    VideoService service;
+    VideoGateway gateway(&service);
+    QVERIFY(gateway.start());
+
+    QLocalSocket socket;
+    socket.connectToServer(VideoGateway::socketName());
+    QVERIFY(socket.waitForConnected(1000));
+
+    socket.write(QByteArray(1024 * 1024 + 1, 'x'));
+    QVERIFY(socket.waitForBytesWritten(3000));
+
+    QTRY_VERIFY_WITH_TIMEOUT(socket.state() == QLocalSocket::UnconnectedState, 3000);
 
     gateway.stop();
     qunsetenv("RK_VIDEO_SOCKET_NAME");

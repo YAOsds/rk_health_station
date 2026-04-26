@@ -4,12 +4,21 @@
 #include <QFile>
 #include <QHostAddress>
 #include <QJsonValue>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTcpSocket>
 #include <QDateTime>
+#include <QTemporaryDir>
 #include <QtTest/QTest>
+
+#include <memory>
+
+#ifndef HEALTHD_TEST_BINARY_PATH
+#define HEALTHD_TEST_BINARY_PATH ""
+#endif
 
 namespace {
 constexpr quint16 kHealthdPort = 19001;
@@ -195,8 +204,66 @@ class HealthdTcpSmokeTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
+    void cleanupTestCase();
     void sendsOneTelemetryFrame();
+
+private:
+    QProcess healthd_;
+    std::unique_ptr<QTemporaryDir> tempDir_;
 };
+
+void HealthdTcpSmokeTest::initTestCase() {
+    tempDir_ = std::make_unique<QTemporaryDir>();
+    QVERIFY(tempDir_->isValid());
+
+    const QString databasePath = tempDir_->filePath(QStringLiteral("healthd_smoke.sqlite"));
+    qputenv(kDatabaseEnvVar, databasePath.toUtf8());
+
+    const QString healthdPath = QString::fromLocal8Bit(HEALTHD_TEST_BINARY_PATH);
+    QVERIFY2(!healthdPath.isEmpty(), "HEALTHD_TEST_BINARY_PATH is not configured");
+    QVERIFY2(QFile::exists(healthdPath), qPrintable(QStringLiteral("healthd not found: %1").arg(healthdPath)));
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QString::fromUtf8(kDatabaseEnvVar), databasePath);
+    healthd_.setProcessEnvironment(env);
+    healthd_.setProgram(healthdPath);
+    healthd_.setProcessChannelMode(QProcess::MergedChannels);
+    healthd_.start();
+    QVERIFY2(healthd_.waitForStarted(3000), qPrintable(healthd_.errorString()));
+
+    bool listening = false;
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        if (healthd_.state() == QProcess::NotRunning) {
+            break;
+        }
+        QTcpSocket probe;
+        probe.connectToHost(QHostAddress::LocalHost, kHealthdPort);
+        if (probe.waitForConnected(100)) {
+            listening = true;
+            probe.disconnectFromHost();
+            break;
+        }
+        probe.abort();
+        QTest::qWait(50);
+    }
+
+    QVERIFY2(listening,
+        qPrintable(QStringLiteral("healthd did not listen on %1, output=%2")
+                       .arg(kHealthdPort)
+                       .arg(QString::fromUtf8(healthd_.readAll()))));
+}
+
+void HealthdTcpSmokeTest::cleanupTestCase() {
+    if (healthd_.state() != QProcess::NotRunning) {
+        healthd_.terminate();
+        if (!healthd_.waitForFinished(3000)) {
+            healthd_.kill();
+            healthd_.waitForFinished(3000);
+        }
+    }
+    qunsetenv(kDatabaseEnvVar);
+}
 
 void HealthdTcpSmokeTest::sendsOneTelemetryFrame() {
     const QString markerPath = resolveMarkerPath();

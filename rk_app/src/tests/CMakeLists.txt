@@ -328,6 +328,10 @@ target_link_libraries(healthd_tcp_smoke_test PRIVATE
     ${RK_QT_NETWORK_TARGET}
 )
 
+target_compile_definitions(healthd_tcp_smoke_test PRIVATE
+    HEALTHD_TEST_BINARY_PATH="$<TARGET_FILE:healthd>"
+)
+
 add_test(NAME healthd_tcp_smoke_test COMMAND healthd_tcp_smoke_test)
 
 add_executable(device_session_test

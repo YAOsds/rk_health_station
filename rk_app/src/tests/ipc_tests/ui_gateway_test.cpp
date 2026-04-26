@@ -18,6 +18,7 @@ private slots:
     void approvePendingDeviceViaGateway();
     void requestAlertsSnapshot();
     void requestHistorySeries();
+    void dropsOversizedFrameBuffer();
 };
 
 class StubHostWifiStatusProvider final : public HostWifiStatusProvider {
@@ -279,6 +280,27 @@ void UiGatewayTest::requestHistorySeries() {
     QCOMPARE(bucket.value(QStringLiteral("avg_heart_rate")).toDouble(), 71.0);
     QCOMPARE(bucket.value(QStringLiteral("min_spo2")).toDouble(), 97.0);
     QCOMPARE(bucket.value(QStringLiteral("avg_battery")).toDouble(), 79.0);
+    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
+}
+
+void UiGatewayTest::dropsOversizedFrameBuffer() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    qputenv("RK_HEALTH_STATION_SOCKET_NAME",
+        tempDir.filePath(QStringLiteral("rk_health_station.sock")).toUtf8());
+
+    DeviceManager deviceManager;
+    UiGateway gateway(&deviceManager);
+    QVERIFY(gateway.start());
+
+    QLocalSocket socket;
+    socket.connectToServer(qEnvironmentVariable("RK_HEALTH_STATION_SOCKET_NAME"));
+    QVERIFY(socket.waitForConnected(3000));
+
+    socket.write(QByteArray(1024 * 1024 + 1, 'x'));
+    QVERIFY(socket.waitForBytesWritten(3000));
+
+    QTRY_VERIFY_WITH_TIMEOUT(socket.state() == QLocalSocket::UnconnectedState, 3000);
     qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 

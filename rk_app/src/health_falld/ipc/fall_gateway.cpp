@@ -20,6 +20,7 @@ FallGateway::~FallGateway() {
 bool FallGateway::start() {
     stop();
     QLocalServer::removeServer(socketName_);
+    server_->setSocketOptions(QLocalServer::UserAccessOption);
     return server_->listen(socketName_);
 }
 

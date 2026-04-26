@@ -117,13 +117,24 @@ configure_runtime() {
 
 configure_runtime
 
+valid_pid() {
+  local pid=$1
+  [[ "${pid}" =~ ^[0-9]+$ ]] && (( pid > 0 ))
+}
+
+pid_started_from_bundle() {
+  local pid=$1
+  local cwd
+  cwd=$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)
+  [[ "${cwd}" == "${BUNDLE_ROOT}" ]]
+}
+
 is_running() {
   local pid_file=$1
   [[ -f "${pid_file}" ]] || return 1
   local pid
   pid=$(cat "${pid_file}")
-  [[ -n "${pid}" ]] || return 1
-  kill -0 "${pid}" 2>/dev/null
+  valid_pid "${pid}" && kill -0 "${pid}" 2>/dev/null && pid_started_from_bundle "${pid}"
 }
 
 start_process() {

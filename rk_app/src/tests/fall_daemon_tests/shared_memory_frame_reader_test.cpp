@@ -3,12 +3,18 @@
 
 #include <QtTest/QTest>
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
 class SharedMemoryFrameReaderTest : public QObject {
     Q_OBJECT
 
 private slots:
     void rejectsDescriptorForOverwrittenSlot();
     void remapsWhenRingIsRecreatedForSameCamera();
+    void rejectsRingHeaderThatExceedsMappedSize();
+    void rejectsMappingSmallerThanRingHeader();
 };
 
 void SharedMemoryFrameReaderTest::rejectsDescriptorForOverwrittenSlot() {
@@ -117,6 +123,55 @@ void SharedMemoryFrameReaderTest::remapsWhenRingIsRecreatedForSameCamera() {
     QCOMPARE(decoded.frameId, second.frameId);
     QCOMPARE(decoded.timestampMs, second.timestampMs);
     QCOMPARE(decoded.payload, second.payload);
+}
+
+
+void SharedMemoryFrameReaderTest::rejectsMappingSmallerThanRingHeader() {
+    const QString shmName = QStringLiteral("/rk_reader_short_header_test");
+    ::shm_unlink(shmName.toUtf8().constData());
+    const int fd = ::shm_open(shmName.toUtf8().constData(), O_CREAT | O_RDWR, 0600);
+    QVERIFY(fd >= 0);
+    QVERIFY(::ftruncate(fd, 1) == 0);
+    ::close(fd);
+
+    SharedMemoryFrameReader reader(shmName);
+    AnalysisFrameDescriptor descriptor;
+    descriptor.cameraId = QStringLiteral("front_cam");
+
+    AnalysisFramePacket decoded;
+    QString error;
+    QVERIFY(!reader.read(descriptor, &decoded, &error));
+    QCOMPARE(error, QStringLiteral("analysis_ring_invalid_header"));
+    ::shm_unlink(shmName.toUtf8().constData());
+}
+
+void SharedMemoryFrameReaderTest::rejectsRingHeaderThatExceedsMappedSize() {
+    const QString shmName = QStringLiteral("/rk_reader_bad_header_test");
+    ::shm_unlink(shmName.toUtf8().constData());
+    const int fd = ::shm_open(shmName.toUtf8().constData(), O_CREAT | O_RDWR, 0600);
+    QVERIFY(fd >= 0);
+    QVERIFY(::ftruncate(fd, sizeof(SharedFrameRingHeader)) == 0);
+
+    void *mapped = ::mmap(nullptr, sizeof(SharedFrameRingHeader), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    QVERIFY(mapped != MAP_FAILED);
+    auto *header = static_cast<SharedFrameRingHeader *>(mapped);
+    *header = SharedFrameRingHeader();
+    header->slotCount = 1;
+    header->slotStride = static_cast<quint32>(sizeof(SharedFrameSlotHeader) + 16);
+    header->maxFrameBytes = 16;
+    ::munmap(mapped, sizeof(SharedFrameRingHeader));
+    ::close(fd);
+
+    SharedMemoryFrameReader reader(shmName);
+    AnalysisFrameDescriptor descriptor;
+    descriptor.cameraId = QStringLiteral("front_cam");
+    descriptor.slotIndex = 1;
+
+    AnalysisFramePacket decoded;
+    QString error;
+    QVERIFY(!reader.read(descriptor, &decoded, &error));
+    QCOMPARE(error, QStringLiteral("analysis_ring_invalid_header"));
+    ::shm_unlink(shmName.toUtf8().constData());
 }
 
 QTEST_MAIN(SharedMemoryFrameReaderTest)

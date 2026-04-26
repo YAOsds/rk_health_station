@@ -15,6 +15,56 @@
 
 static const char *TAG = "AUTH_CLIENT";
 
+static bool json_escape_string(const char *input, char *output, size_t output_len)
+{
+    size_t used = 0;
+
+    if (input == NULL || output == NULL || output_len == 0) {
+        return false;
+    }
+
+    for (const unsigned char *cursor = (const unsigned char *)input; *cursor != '\0'; ++cursor) {
+        const char *replacement = NULL;
+        char unicode_escape[7];
+
+        if (*cursor == '"') {
+            replacement = "\\\"";
+        } else if (*cursor == '\\') {
+            replacement = "\\\\";
+        } else if (*cursor == '\b') {
+            replacement = "\\b";
+        } else if (*cursor == '\f') {
+            replacement = "\\f";
+        } else if (*cursor == '\n') {
+            replacement = "\\n";
+        } else if (*cursor == '\r') {
+            replacement = "\\r";
+        } else if (*cursor == '\t') {
+            replacement = "\\t";
+        } else if (*cursor < 0x20U) {
+            snprintf(unicode_escape, sizeof(unicode_escape), "\\u%04x", (unsigned)*cursor);
+            replacement = unicode_escape;
+        }
+
+        if (replacement != NULL) {
+            const size_t len = strlen(replacement);
+            if (used + len >= output_len) {
+                return false;
+            }
+            memcpy(output + used, replacement, len);
+            used += len;
+        } else {
+            if (used + 1 >= output_len) {
+                return false;
+            }
+            output[used++] = (char)*cursor;
+        }
+    }
+
+    output[used] = '\0';
+    return true;
+}
+
 static bool json_extract_string(const char *json, const char *key, char *buffer, size_t buffer_len)
 {
     char pattern[64];
@@ -136,46 +186,68 @@ esp_err_t auth_client_build_proof(const rk_device_config_t *config, const char *
 static esp_err_t send_auth_hello(const rk_device_config_t *config, const char *firmware_version)
 {
     char frame[768];
+    char escaped_device_id[384];
+    char escaped_device_name[384];
+    char escaped_firmware_version[192];
     char mac[18] = {0};
     int64_t ts = esp_timer_get_time() / 1000000;
+    int written;
 
     if (build_mac_string(mac, sizeof(mac)) != ESP_OK) {
         return ESP_FAIL;
     }
 
-    snprintf(frame, sizeof(frame),
+    if (!json_escape_string(config->device_id, escaped_device_id, sizeof(escaped_device_id))
+        || !json_escape_string(config->device_name, escaped_device_name, sizeof(escaped_device_name))
+        || !json_escape_string(firmware_version != NULL ? firmware_version : "esp-fw",
+            escaped_firmware_version, sizeof(escaped_firmware_version))) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    written = snprintf(frame, sizeof(frame),
         "{\"ver\":1,\"type\":\"auth_hello\",\"seq\":1,\"ts\":%lld,\"device_id\":\"%s\","
         "\"payload\":{\"device_name\":\"%s\",\"firmware_version\":\"%s\","
         "\"hardware_model\":\"esp32s3\",\"mac\":\"%s\"}}",
         (long long)ts,
-        config->device_id,
-        config->device_name,
-        firmware_version != NULL ? firmware_version : "esp-fw",
+        escaped_device_id,
+        escaped_device_name,
+        escaped_firmware_version,
         mac);
+    if (written <= 0 || (size_t)written >= sizeof(frame)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
     return tcp_client_send_frame(frame, strlen(frame));
 }
 
 static esp_err_t send_auth_proof(const rk_device_config_t *config, const char *server_nonce)
 {
     char frame[768];
+    char escaped_device_id[384];
     char client_nonce[33];
     char proof_hex[65] = {0};
     int64_t ts = esp_timer_get_time() / 1000000;
+    int written;
 
     snprintf(client_nonce, sizeof(client_nonce), "%08" PRIx32 "%08" PRIx32,
         (uint32_t)esp_random(), (uint32_t)esp_random());
+    if (!json_escape_string(config->device_id, escaped_device_id, sizeof(escaped_device_id))) {
+        return ESP_ERR_INVALID_SIZE;
+    }
     if (auth_client_build_proof(config, server_nonce, client_nonce, ts, proof_hex, sizeof(proof_hex)) != ESP_OK) {
         return ESP_FAIL;
     }
 
-    snprintf(frame, sizeof(frame),
+    written = snprintf(frame, sizeof(frame),
         "{\"ver\":1,\"type\":\"auth_proof\",\"seq\":2,\"ts\":%lld,\"device_id\":\"%s\","
         "\"payload\":{\"client_nonce\":\"%s\",\"proof\":\"%s\",\"ts\":%lld}}",
         (long long)ts,
-        config->device_id,
+        escaped_device_id,
         client_nonce,
         proof_hex,
         (long long)ts);
+    if (written <= 0 || (size_t)written >= sizeof(frame)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
     return tcp_client_send_frame(frame, strlen(frame));
 }
 

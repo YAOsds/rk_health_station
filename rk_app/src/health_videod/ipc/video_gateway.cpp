@@ -10,6 +10,7 @@ namespace {
 const char kSocketName[] = "rk_video.sock";
 const char kSocketEnvVar[] = "RK_VIDEO_SOCKET_NAME";
 const char kLineSeparator = '\n';
+constexpr int kMaxBufferedBytes = 1024 * 1024;
 }
 
 QString VideoGateway::socketName() {
@@ -31,6 +32,7 @@ VideoGateway::~VideoGateway() {
 bool VideoGateway::start() {
     stop();
     QLocalServer::removeServer(socketName());
+    server_->setSocketOptions(QLocalServer::UserAccessOption);
     return server_->listen(socketName());
 }
 
@@ -71,6 +73,11 @@ void VideoGateway::onSocketReadyRead() {
 
     QByteArray &buffer = readBuffers_[socket];
     buffer.append(socket->readAll());
+    if (buffer.size() > kMaxBufferedBytes) {
+        readBuffers_.remove(socket);
+        socket->disconnectFromServer();
+        return;
+    }
 
     int separatorIndex = buffer.indexOf(kLineSeparator);
     while (separatorIndex >= 0) {

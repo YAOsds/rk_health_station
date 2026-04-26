@@ -9,6 +9,18 @@ VIDEO_SOCKET_PATH=${RK_VIDEO_SOCKET_NAME:-${RUN_DIR}/rk_video.sock}
 VIDEO_ANALYSIS_SOCKET_PATH=${RK_VIDEO_ANALYSIS_SOCKET_PATH:-${RUN_DIR}/rk_video_analysis.sock}
 FALL_SOCKET_PATH=${RK_FALL_SOCKET_NAME:-${RUN_DIR}/rk_fall.sock}
 
+valid_pid() {
+  local pid=$1
+  [[ "${pid}" =~ ^[0-9]+$ ]] && (( pid > 0 ))
+}
+
+pid_started_from_bundle() {
+  local pid=$1
+  local cwd
+  cwd=$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)
+  [[ "${cwd}" == "${BUNDLE_ROOT}" ]]
+}
+
 stop_pid_file() {
   local name=$1
   local pid_file=$2
@@ -16,7 +28,13 @@ stop_pid_file() {
 
   local pid
   pid=$(cat "${pid_file}")
-  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+  if valid_pid "${pid}" && kill -0 "${pid}" 2>/dev/null; then
+    if ! pid_started_from_bundle "${pid}"; then
+      echo "skipped ${name} (${pid}); pid is not from this bundle"
+      rm -f "${pid_file}"
+      return 0
+    fi
+
     kill "${pid}" 2>/dev/null || true
     for _ in $(seq 1 50); do
       if ! kill -0 "${pid}" 2>/dev/null; then

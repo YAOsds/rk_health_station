@@ -6,7 +6,12 @@ PROJECT_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 SOURCE_DIR="${PROJECT_ROOT}/rk_app"
 JOBS=${JOBS:-$(nproc)}
 BUILD_TESTING=${BUILD_TESTING:-OFF}
-TARGETS=${TARGETS:-healthd health-ui health-videod health-falld}
+DEFAULT_TARGETS="healthd health-ui health-videod health-falld"
+TARGETS_WAS_SET=0
+if [[ -v TARGETS ]]; then
+  TARGETS_WAS_SET=1
+fi
+TARGETS=${TARGETS:-${DEFAULT_TARGETS}}
 
 usage() {
   cat <<'EOF'
@@ -68,9 +73,17 @@ shift
 
 verify_path "${SOURCE_DIR}/CMakeLists.txt"
 
-read -r -a BUILD_TARGETS <<< "${TARGETS}"
 CMAKE_ARGS=("$@")
 CONFIGURE_ARGS=()
+BUILD_TESTING_EFFECTIVE=${BUILD_TESTING}
+for arg in "${CMAKE_ARGS[@]}"; do
+  case "${arg}" in
+    -DBUILD_TESTING=*)
+      BUILD_TESTING_EFFECTIVE=${arg#-DBUILD_TESTING=}
+      ;;
+  esac
+done
+read -r -a BUILD_TARGETS <<< "${TARGETS}"
 
 case "${MODE}" in
   host)
@@ -78,7 +91,7 @@ case "${MODE}" in
     CONFIGURE_ARGS=(
       -S "${SOURCE_DIR}"
       -B "${BUILD_DIR}"
-      -DBUILD_TESTING="${BUILD_TESTING}"
+      -DBUILD_TESTING="${BUILD_TESTING_EFFECTIVE}"
       -DRKAPP_ENABLE_REAL_RKNN_POSE=OFF
       -DRKAPP_ENABLE_REAL_RKNN_ACTION=OFF
     )
@@ -101,7 +114,7 @@ case "${MODE}" in
       -B "${BUILD_DIR}"
       -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}"
       -DRK3588_SDK_ROOT="${SDK_ROOT}"
-      -DBUILD_TESTING="${BUILD_TESTING}"
+      -DBUILD_TESTING="${BUILD_TESTING_EFFECTIVE}"
       -DRKAPP_ENABLE_REAL_RKNN_POSE="${RKAPP_ENABLE_REAL_RKNN_POSE}"
       -DRKAPP_ENABLE_REAL_RKNN_ACTION="${RKAPP_ENABLE_REAL_RKNN_ACTION}"
       -DRKAPP_ENABLE_REAL_STGCN="${RKAPP_ENABLE_REAL_STGCN}"
@@ -122,9 +135,14 @@ esac
 log "mode: ${MODE}"
 log "source dir: ${SOURCE_DIR}"
 log "build dir: ${BUILD_DIR}"
-log "targets: ${TARGETS}"
+if [[ "${MODE}" == "host" && "${BUILD_TESTING_EFFECTIVE}" == "ON" && "${TARGETS_WAS_SET}" == "0" ]]; then
+  BUILD_TARGETS=()
+  log "targets: all"
+else
+  log "targets: ${TARGETS}"
+fi
 log "jobs: ${JOBS}"
-log "build testing: ${BUILD_TESTING}"
+log "build testing: ${BUILD_TESTING_EFFECTIVE}"
 
 if [[ "${MODE}" == "rk3588" ]]; then
   log "sdk root: ${SDK_ROOT}"
@@ -138,7 +156,11 @@ if [[ "${MODE}" == "rk3588" ]]; then
 fi
 
 cmake "${CONFIGURE_ARGS[@]}" "${CMAKE_ARGS[@]}"
-cmake --build "${BUILD_DIR}" --target "${BUILD_TARGETS[@]}" -j"${JOBS}"
+if (( ${#BUILD_TARGETS[@]} > 0 )); then
+  cmake --build "${BUILD_DIR}" --target "${BUILD_TARGETS[@]}" -j"${JOBS}"
+else
+  cmake --build "${BUILD_DIR}" -j"${JOBS}"
+fi
 
 cat <<EOF
 Build completed:

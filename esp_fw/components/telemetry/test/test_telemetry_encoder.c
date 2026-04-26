@@ -30,3 +30,17 @@ void test_telemetry_encoder_includes_required_fields(void)
     TEST_ASSERT_NOT_NULL(strstr(frame, "\"imu_fall_valid\":1"));
     TEST_ASSERT_NOT_NULL(strstr(frame, "\"imu_fall_class\":2"));
 }
+
+void test_telemetry_encoder_escapes_string_fields(void)
+{
+    telemetry_vitals_t vitals = {0};
+    char frame[512] = {0};
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+        telemetry_uploader_build_frame("watch_\\\"001", "RK \\\"Watch\\\\ 01", "1.0.0-\\\"rk", 13,
+            1713000011, &vitals, frame, sizeof(frame)));
+
+    TEST_ASSERT_NOT_NULL(strstr(frame, "\"device_id\":\"watch_\\\\\\\"001\""));
+    TEST_ASSERT_NOT_NULL(strstr(frame, "\"firmware_version\":\"1.0.0-\\\\\\\"rk\""));
+    TEST_ASSERT_NOT_NULL(strstr(frame, "\"device_name\":\"RK \\\\\\\"Watch\\\\\\\\ 01\""));
+}

@@ -1,6 +1,8 @@
 #include "telemetry_uploader.h"
 
 #include <inttypes.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -12,6 +14,56 @@ static char s_firmware_version[32] = {0};
 static bool s_initialized;
 static bool s_authenticated;
 static uint32_t s_next_seq = 1;
+
+static bool json_escape_string(const char *input, char *output, size_t output_len)
+{
+    size_t used = 0;
+
+    if (input == NULL || output == NULL || output_len == 0) {
+        return false;
+    }
+
+    for (const unsigned char *cursor = (const unsigned char *)input; *cursor != '\0'; ++cursor) {
+        const char *replacement = NULL;
+        char unicode_escape[7];
+
+        if (*cursor == '"') {
+            replacement = "\\\"";
+        } else if (*cursor == '\\') {
+            replacement = "\\\\";
+        } else if (*cursor == '\b') {
+            replacement = "\\b";
+        } else if (*cursor == '\f') {
+            replacement = "\\f";
+        } else if (*cursor == '\n') {
+            replacement = "\\n";
+        } else if (*cursor == '\r') {
+            replacement = "\\r";
+        } else if (*cursor == '\t') {
+            replacement = "\\t";
+        } else if (*cursor < 0x20U) {
+            snprintf(unicode_escape, sizeof(unicode_escape), "\\u%04x", (unsigned)*cursor);
+            replacement = unicode_escape;
+        }
+
+        if (replacement != NULL) {
+            const size_t len = strlen(replacement);
+            if (used + len >= output_len) {
+                return false;
+            }
+            memcpy(output + used, replacement, len);
+            used += len;
+        } else {
+            if (used + 1 >= output_len) {
+                return false;
+            }
+            output[used++] = (char)*cursor;
+        }
+    }
+
+    output[used] = '\0';
+    return true;
+}
 
 esp_err_t telemetry_uploader_init(const rk_device_config_t *config, const char *firmware_version)
 {
@@ -52,10 +104,19 @@ esp_err_t telemetry_uploader_build_frame(const char *device_id, const char *devi
     const telemetry_vitals_t *vitals, char *buffer, size_t buffer_len)
 {
     int written;
+    char escaped_device_id[384];
+    char escaped_device_name[384];
+    char escaped_firmware_version[192];
 
     if (device_id == NULL || device_name == NULL || firmware_version == NULL
         || vitals == NULL || buffer == NULL || buffer_len == 0) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!json_escape_string(device_id, escaped_device_id, sizeof(escaped_device_id))
+        || !json_escape_string(device_name, escaped_device_name, sizeof(escaped_device_name))
+        || !json_escape_string(firmware_version, escaped_firmware_version, sizeof(escaped_firmware_version))) {
+        return ESP_ERR_INVALID_SIZE;
     }
 
     written = snprintf(buffer, buffer_len,
@@ -67,7 +128,7 @@ esp_err_t telemetry_uploader_build_frame(const char *device_id, const char *devi
         "\"device_name\":\"%s\"}}",
         seq,
         (long long)ts,
-        device_id,
+        escaped_device_id,
         vitals->heart_rate,
         (double)vitals->spo2,
         (double)vitals->acceleration,
@@ -77,8 +138,8 @@ esp_err_t telemetry_uploader_build_frame(const char *device_id, const char *devi
         (double)vitals->imu_fall.non_fall_prob,
         (double)vitals->imu_fall.pre_impact_prob,
         (double)vitals->imu_fall.fall_prob,
-        firmware_version,
-        device_name);
+        escaped_firmware_version,
+        escaped_device_name);
     if (written <= 0 || (size_t)written >= buffer_len) {
         return ESP_ERR_INVALID_SIZE;
     }

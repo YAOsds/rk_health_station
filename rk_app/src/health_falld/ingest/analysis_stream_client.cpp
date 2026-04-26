@@ -9,6 +9,7 @@
 
 namespace {
 constexpr int kReconnectDelayMs = 300;
+constexpr int kMaxBufferedBytes = 1024 * 1024;
 const char kFallLatencyMarkerEnvVar[] = "RK_FALL_LATENCY_MARKER_PATH";
 }
 
@@ -79,6 +80,11 @@ void AnalysisStreamClient::scheduleReconnect() {
 
 void AnalysisStreamClient::onReadyRead() {
     readBuffer_.append(socket_->readAll());
+    if (readBuffer_.size() > kMaxBufferedBytes) {
+        readBuffer_.clear();
+        socket_->disconnectFromServer();
+        return;
+    }
 
     AnalysisFrameDescriptor descriptor;
     while (takeFirstAnalysisFrameDescriptor(&readBuffer_, &descriptor)) {

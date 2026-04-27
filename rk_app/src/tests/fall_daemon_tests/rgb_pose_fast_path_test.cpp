@@ -9,6 +9,7 @@ private slots:
     void detectsModelSizedRgbFrame();
     void letterboxesRgbFrameWhenResizeIsRequired();
     void rejectsRgbFrameWithWrongPayloadSize();
+    void preservesPoseMetadataForModelSizedRgbFrame();
 };
 
 void RgbPoseFastPathTest::detectsModelSizedRgbFrame() {
@@ -42,6 +43,27 @@ void RgbPoseFastPathTest::letterboxesRgbFrameWhenResizeIsRequired() {
     QCOMPARE(result.xPad, 0);
     QCOMPARE(result.yPad, 1);
     QCOMPARE(result.scale, 1.0f);
+}
+
+void RgbPoseFastPathTest::preservesPoseMetadataForModelSizedRgbFrame() {
+    AnalysisFramePacket frame;
+    frame.cameraId = QStringLiteral("front_cam");
+    frame.width = 4;
+    frame.height = 4;
+    frame.pixelFormat = AnalysisPixelFormat::Rgb;
+    frame.posePreprocessed = true;
+    frame.poseXPad = 0;
+    frame.poseYPad = 1;
+    frame.poseScale = 0.75f;
+    frame.payload = QByteArray(4 * 4 * 3, '\x22');
+
+    QString error;
+    QVERIFY(canUseRgbPoseFastPath(frame, 4, 4, &error));
+    const PosePreprocessResult result = preprocessRgbFrameForPose(frame, 4, 4, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(result.xPad, 0);
+    QCOMPARE(result.yPad, 1);
+    QCOMPARE(result.scale, 0.75f);
 }
 
 void RgbPoseFastPathTest::rejectsRgbFrameWithWrongPayloadSize() {

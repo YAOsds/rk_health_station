@@ -9,6 +9,7 @@ class AnalysisFrameDescriptorProtocolTest : public QObject {
 private slots:
     void roundTripsDescriptor();
     void rejectsInvalidSlotIndex();
+    void roundTripsPosePreprocessMetadata();
 };
 
 void AnalysisFrameDescriptorProtocolTest::roundTripsDescriptor() {
@@ -29,6 +30,31 @@ void AnalysisFrameDescriptorProtocolTest::roundTripsDescriptor() {
     QCOMPARE(decoded.slotIndex, 2u);
     QCOMPARE(decoded.sequence, 18u);
     QCOMPARE(decoded.payloadBytes, 640u * 640u * 3u);
+}
+
+void AnalysisFrameDescriptorProtocolTest::roundTripsPosePreprocessMetadata() {
+    AnalysisFrameDescriptor descriptor;
+    descriptor.frameId = 99;
+    descriptor.timestampMs = 1777000000333;
+    descriptor.cameraId = QStringLiteral("front_cam");
+    descriptor.width = 640;
+    descriptor.height = 640;
+    descriptor.pixelFormat = AnalysisPixelFormat::Rgb;
+    descriptor.slotIndex = 3;
+    descriptor.sequence = 20;
+    descriptor.payloadBytes = 640 * 640 * 3;
+    descriptor.posePreprocessed = true;
+    descriptor.poseXPad = 0;
+    descriptor.poseYPad = 80;
+    descriptor.poseScale = 1.0f;
+
+    const QByteArray encoded = encodeAnalysisFrameDescriptor(descriptor);
+    AnalysisFrameDescriptor decoded;
+    QVERIFY(decodeAnalysisFrameDescriptor(encoded, &decoded));
+    QVERIFY(decoded.posePreprocessed);
+    QCOMPARE(decoded.poseXPad, 0);
+    QCOMPARE(decoded.poseYPad, 80);
+    QCOMPARE(decoded.poseScale, 1.0f);
 }
 
 void AnalysisFrameDescriptorProtocolTest::rejectsInvalidSlotIndex() {

@@ -25,6 +25,9 @@ struct SharedFrameSlotHeader {
     qint32 pixelFormat = 0;
     quint32 payloadBytes = 0;
     quint32 flags = 0;
+    qint32 poseXPad = 0;
+    qint32 poseYPad = 0;
+    float poseScale = 1.0f;
 };
 
 struct SharedFramePublishResult {

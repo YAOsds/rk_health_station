@@ -294,6 +294,7 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
         pipeline.stdoutBuffer.remove(0, pipeline.analysisInputFrameBytes);
 
         QByteArray rgbPayload;
+        AnalysisFrameConversionMetadata conversionMetadata;
         if (pipeline.analysisConvertBackend == AnalysisConvertBackend::Rga) {
             AnalysisFrameConverter *converter = analysisFrameConverter_
                 ? analysisFrameConverter_
@@ -305,6 +306,7 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
                     pipeline.analysisOutputWidth,
                     pipeline.analysisOutputHeight,
                     &rgbPayload,
+                    &conversionMetadata,
                     &convertError)) {
                 qWarning().noquote()
                     << QStringLiteral("video_runtime camera=%1 event=analysis_convert_failed backend=rga error=%2")
@@ -332,6 +334,10 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
         packet.width = pipeline.analysisOutputWidth;
         packet.height = pipeline.analysisOutputHeight;
         packet.pixelFormat = AnalysisPixelFormat::Rgb;
+        packet.posePreprocessed = conversionMetadata.posePreprocessed;
+        packet.poseXPad = conversionMetadata.poseXPad;
+        packet.poseYPad = conversionMetadata.poseYPad;
+        packet.poseScale = conversionMetadata.poseScale;
         packet.payload = rgbPayload;
 
         if (analysisFrameSource_ && analysisFrameSource_->acceptsFrames(packet.cameraId)
@@ -348,6 +354,10 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
             descriptor.width = packet.width;
             descriptor.height = packet.height;
             descriptor.pixelFormat = packet.pixelFormat;
+            descriptor.posePreprocessed = packet.posePreprocessed;
+            descriptor.poseXPad = packet.poseXPad;
+            descriptor.poseYPad = packet.poseYPad;
+            descriptor.poseScale = packet.poseScale;
             descriptor.slotIndex = publish.slotIndex;
             descriptor.sequence = publish.sequence;
             descriptor.payloadBytes = publish.payloadBytes;

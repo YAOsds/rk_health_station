@@ -34,6 +34,8 @@ void PoseStageTimingLoggerTest::writesStructuredStageDurations() {
     sample.inputsSetMs = 3;
     sample.rknnRunMs = 27;
     sample.outputsGetMs = 4;
+    sample.ioMemPath = true;
+    sample.outputPreallocPath = true;
     sample.postProcessMs = 6;
     sample.totalMs = 52;
     sample.peopleCount = 1;

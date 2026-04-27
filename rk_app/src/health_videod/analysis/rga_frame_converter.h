@@ -10,5 +10,6 @@ public:
         int dstWidth,
         int dstHeight,
         QByteArray *rgb,
+        AnalysisFrameConversionMetadata *metadata,
         QString *error) override;
 };

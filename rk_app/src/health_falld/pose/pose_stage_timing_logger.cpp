@@ -34,6 +34,8 @@ void PoseStageTimingLogger::appendSample(
     json.insert(QStringLiteral("inputs_set_ms"), sample.inputsSetMs);
     json.insert(QStringLiteral("rknn_run_ms"), sample.rknnRunMs);
     json.insert(QStringLiteral("outputs_get_ms"), sample.outputsGetMs);
+    json.insert(QStringLiteral("io_mem_path"), sample.ioMemPath);
+    json.insert(QStringLiteral("output_prealloc_path"), sample.outputPreallocPath);
     json.insert(QStringLiteral("post_process_ms"), sample.postProcessMs);
     json.insert(QStringLiteral("total_ms"), sample.totalMs);
     json.insert(QStringLiteral("people_count"), sample.peopleCount);

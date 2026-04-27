@@ -700,6 +700,7 @@ add_test(NAME gstreamer_video_pipeline_backend_test COMMAND gstreamer_video_pipe
 add_executable(shared_memory_frame_ring_test
     video_daemon_tests/shared_memory_frame_ring_test.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_falld/ingest/shared_memory_frame_reader.cpp
 )
 
 set_target_properties(shared_memory_frame_ring_test PROPERTIES
@@ -708,6 +709,7 @@ set_target_properties(shared_memory_frame_ring_test PROPERTIES
 
 target_include_directories(shared_memory_frame_ring_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 

@@ -4,7 +4,7 @@
 
 namespace {
 constexpr quint32 kDescriptorMagic = 0x524B4144; // RKAD
-constexpr quint16 kDescriptorVersion = 1;
+constexpr quint16 kDescriptorVersion = 2;
 constexpr quint32 kMaxDescriptorSlotIndex = 64;
 
 bool isKnownPixelFormat(qint32 value) {
@@ -54,6 +54,10 @@ QByteArray encodeAnalysisFrameDescriptorPayload(const AnalysisFrameDescriptor &d
            << descriptor.width
            << descriptor.height
            << static_cast<qint32>(descriptor.pixelFormat)
+           << descriptor.posePreprocessed
+           << descriptor.poseXPad
+           << descriptor.poseYPad
+           << descriptor.poseScale
            << descriptor.slotIndex
            << descriptor.sequence
            << descriptor.payloadBytes;
@@ -80,13 +84,29 @@ bool decodeAnalysisFrameDescriptorPayload(
            >> descriptor->cameraId
            >> descriptor->width
            >> descriptor->height
-           >> pixelFormatValue
-           >> descriptor->slotIndex
+           >> pixelFormatValue;
+
+    if (stream.status() != QDataStream::Ok || magic != kDescriptorMagic
+        || (version != 1 && version != kDescriptorVersion)) {
+        return false;
+    }
+
+    descriptor->posePreprocessed = false;
+    descriptor->poseXPad = 0;
+    descriptor->poseYPad = 0;
+    descriptor->poseScale = 1.0f;
+    if (version >= 2) {
+        stream >> descriptor->posePreprocessed
+               >> descriptor->poseXPad
+               >> descriptor->poseYPad
+               >> descriptor->poseScale;
+    }
+
+    stream >> descriptor->slotIndex
            >> descriptor->sequence
            >> descriptor->payloadBytes;
 
-    if (stream.status() != QDataStream::Ok || magic != kDescriptorMagic
-        || version != kDescriptorVersion) {
+    if (stream.status() != QDataStream::Ok) {
         return false;
     }
     if (!isKnownPixelFormat(pixelFormatValue)) {

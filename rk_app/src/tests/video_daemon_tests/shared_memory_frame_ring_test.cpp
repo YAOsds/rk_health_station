@@ -1,4 +1,5 @@
 #include "analysis/shared_memory_frame_ring.h"
+#include "ingest/shared_memory_frame_reader.h"
 
 #include <QtTest/QTest>
 
@@ -8,6 +9,7 @@ class SharedMemoryFrameRingTest : public QObject {
 private slots:
     void writesRgbFrameIntoNextSlot();
     void publishesCommittedEvenSequenceNumbers();
+    void preservesPosePreprocessMetadata();
 };
 
 void SharedMemoryFrameRingTest::writesRgbFrameIntoNextSlot() {
@@ -49,6 +51,42 @@ void SharedMemoryFrameRingTest::publishesCommittedEvenSequenceNumbers() {
     const SharedFramePublishResult second = writer.publish(frame);
     QCOMPARE(second.slotIndex, 1u);
     QCOMPARE(second.sequence, 2u);
+}
+
+void SharedMemoryFrameRingTest::preservesPosePreprocessMetadata() {
+    SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 2, 4 * 4 * 3);
+    QVERIFY(writer.initialize());
+
+    AnalysisFramePacket frame;
+    frame.frameId = 10;
+    frame.timestampMs = 200;
+    frame.cameraId = QStringLiteral("front_cam");
+    frame.width = 4;
+    frame.height = 4;
+    frame.pixelFormat = AnalysisPixelFormat::Rgb;
+    frame.payload = QByteArray(4 * 4 * 3, '\x24');
+    frame.posePreprocessed = true;
+    frame.poseXPad = 1;
+    frame.poseYPad = 2;
+    frame.poseScale = 0.5f;
+
+    const SharedFramePublishResult publish = writer.publish(frame);
+    QVERIFY(publish.sequence > 0);
+
+    SharedMemoryFrameReader reader;
+    AnalysisFrameDescriptor descriptor;
+    descriptor.cameraId = frame.cameraId;
+    descriptor.slotIndex = publish.slotIndex;
+    descriptor.sequence = publish.sequence;
+    descriptor.payloadBytes = publish.payloadBytes;
+
+    AnalysisFramePacket decoded;
+    QString error;
+    QVERIFY(reader.read(descriptor, &decoded, &error));
+    QVERIFY(decoded.posePreprocessed);
+    QCOMPARE(decoded.poseXPad, 1);
+    QCOMPARE(decoded.poseYPad, 2);
+    QCOMPARE(decoded.poseScale, 0.5f);
 }
 
 QTEST_MAIN(SharedMemoryFrameRingTest)

@@ -107,7 +107,10 @@ SharedFramePublishResult SharedMemoryFrameRingWriter::publish(const AnalysisFram
     slotHeader->height = frame.height;
     slotHeader->pixelFormat = static_cast<qint32>(frame.pixelFormat);
     slotHeader->payloadBytes = static_cast<quint32>(frame.payload.size());
-    slotHeader->flags = 0;
+    slotHeader->flags = frame.posePreprocessed ? 1u : 0u;
+    slotHeader->poseXPad = frame.poseXPad;
+    slotHeader->poseYPad = frame.poseYPad;
+    slotHeader->poseScale = frame.poseScale;
     __atomic_thread_fence(__ATOMIC_RELEASE);
     __atomic_store_n(&slotHeader->sequence, committedSequence, __ATOMIC_RELEASE);
 

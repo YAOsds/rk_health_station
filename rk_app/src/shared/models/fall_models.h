@@ -18,6 +18,10 @@ struct AnalysisFramePacket {
     qint32 width = 0;
     qint32 height = 0;
     AnalysisPixelFormat pixelFormat = AnalysisPixelFormat::Jpeg;
+    bool posePreprocessed = false;
+    qint32 poseXPad = 0;
+    qint32 poseYPad = 0;
+    float poseScale = 1.0f;
     QByteArray payload;
 };
 
@@ -28,6 +32,10 @@ struct AnalysisFrameDescriptor {
     qint32 width = 0;
     qint32 height = 0;
     AnalysisPixelFormat pixelFormat = AnalysisPixelFormat::Jpeg;
+    bool posePreprocessed = false;
+    qint32 poseXPad = 0;
+    qint32 poseYPad = 0;
+    float poseScale = 1.0f;
     quint32 slotIndex = 0;
     quint64 sequence = 0;
     quint32 payloadBytes = 0;

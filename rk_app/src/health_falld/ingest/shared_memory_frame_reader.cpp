@@ -62,6 +62,10 @@ bool SharedMemoryFrameReader::read(
     packet->width = slotHeader->width;
     packet->height = slotHeader->height;
     packet->pixelFormat = static_cast<AnalysisPixelFormat>(slotHeader->pixelFormat);
+    packet->posePreprocessed = (slotHeader->flags & 1u) != 0u;
+    packet->poseXPad = slotHeader->poseXPad;
+    packet->poseYPad = slotHeader->poseYPad;
+    packet->poseScale = slotHeader->poseScale;
     packet->payload = QByteArray(slotPayloadFor(descriptor.slotIndex), slotHeader->payloadBytes);
 
     const quint64 secondSequence = __atomic_load_n(&slotHeader->sequence, __ATOMIC_ACQUIRE);

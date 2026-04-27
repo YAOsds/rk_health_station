@@ -197,6 +197,11 @@ PosePreprocessResult preprocessRgbFrameForPose(
             error->clear();
         }
         result.packedRgb = frame.payload;
+        if (frame.posePreprocessed) {
+            result.xPad = frame.poseXPad;
+            result.yPad = frame.poseYPad;
+            result.scale = frame.poseScale;
+        }
         return result;
     }
 

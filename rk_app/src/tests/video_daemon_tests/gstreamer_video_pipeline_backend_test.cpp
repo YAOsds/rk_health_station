@@ -32,6 +32,7 @@ public:
         int dstWidth,
         int dstHeight,
         QByteArray *rgb,
+        AnalysisFrameConversionMetadata *metadata,
         QString *error) override {
         Q_UNUSED(error);
         calls++;
@@ -41,6 +42,12 @@ public:
         lastDstWidth = dstWidth;
         lastDstHeight = dstHeight;
         rgb->fill('\x7f', dstWidth * dstHeight * 3);
+        if (metadata) {
+            metadata->posePreprocessed = true;
+            metadata->poseXPad = 0;
+            metadata->poseYPad = 80;
+            metadata->poseScale = 1.0f;
+        }
         return true;
     }
 
@@ -455,6 +462,10 @@ void GstreamerVideoPipelineBackendTest::convertsRgaNv12FramesToRgbDescriptors() 
     QCOMPARE(analysisSource.descriptors.first().height, 640);
     QCOMPARE(analysisSource.descriptors.first().pixelFormat, AnalysisPixelFormat::Rgb);
     QCOMPARE(analysisSource.descriptors.first().payloadBytes, 640u * 640u * 3u);
+    QVERIFY(analysisSource.descriptors.first().posePreprocessed);
+    QCOMPARE(analysisSource.descriptors.first().poseXPad, 0);
+    QCOMPARE(analysisSource.descriptors.first().poseYPad, 80);
+    QCOMPARE(analysisSource.descriptors.first().poseScale, 1.0f);
 
     qunsetenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND");
     qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");

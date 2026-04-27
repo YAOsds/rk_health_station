@@ -44,6 +44,8 @@ add_executable(health-falld
     domain/fall_event_policy.h
     ingest/analysis_stream_client.cpp
     ingest/analysis_stream_client.h
+    ingest/dmabuf_frame_reader.cpp
+    ingest/dmabuf_frame_reader.h
     ingest/shared_memory_frame_reader.cpp
     ingest/shared_memory_frame_reader.h
     ipc/fall_gateway.cpp

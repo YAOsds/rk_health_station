@@ -10,6 +10,7 @@ struct PoseStageTimingSample {
     qint64 rknnRunMs = 0;
     qint64 outputsGetMs = 0;
     bool ioMemPath = false;
+    bool inputDmaBufPath = false;
     bool outputPreallocPath = false;
     qint64 postProcessMs = 0;
     qint64 totalMs = 0;

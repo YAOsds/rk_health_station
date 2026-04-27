@@ -26,9 +26,16 @@ struct RknnPoseRuntime {
 namespace {
 const char kPoseTimingPathEnvVar[] = "RK_FALL_POSE_TIMING_PATH";
 const char kRknnIoMemEnvVar[] = "RK_FALL_RKNN_IO_MEM";
+const char kRknnInputDmaBufEnvVar[] = "RK_FALL_RKNN_INPUT_DMABUF";
 
 QByteArray rknnIoMemEnvValue() {
     return qgetenv(kRknnIoMemEnvVar).trimmed().toLower();
+}
+
+
+bool rknnInputDmaBufEnabledByEnv() {
+    const QByteArray value = qgetenv(kRknnInputDmaBufEnvVar).trimmed().toLower();
+    return value.isEmpty() || (value != "0" && value != "false" && value != "off");
 }
 
 bool rknnOutputOptimizationEnabledByEnv() {
@@ -390,17 +397,51 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
     poseTimingSample.preprocessMs = stageTimer.elapsed();
 
     int ret = 0;
-    const bool useIoMem = runtime->ioMemReady && runtime->inputMem != nullptr
+    rknn_tensor_attr inputIoAttr = runtime->appCtx.input_attrs[0];
+    inputIoAttr.type = RKNN_TENSOR_UINT8;
+    inputIoAttr.fmt = RKNN_TENSOR_NHWC;
+    inputIoAttr.pass_through = 0;
+
+    rknn_tensor_mem *frameInputMem = nullptr;
+    const bool framePayloadIsModelInput = frame.payloadTransport == AnalysisPayloadTransport::DmaBuf
+        && frame.dmaBufPayload && frame.dmaBufPayload->fd >= 0 && inputBuffer == frame.payload.constData()
+        && inputSize > 0;
+    if (rknnInputDmaBufEnabledByEnv() && framePayloadIsModelInput) {
+        frameInputMem = rknn_create_mem_from_fd(runtime->appCtx.rknn_ctx,
+            frame.dmaBufPayload->fd, const_cast<char *>(inputBuffer), inputSize, 0);
+        if (frameInputMem != nullptr) {
+            ret = rknn_set_io_mem(runtime->appCtx.rknn_ctx, frameInputMem, &inputIoAttr);
+            if (ret < 0) {
+                rknn_destroy_mem(runtime->appCtx.rknn_ctx, frameInputMem);
+                frameInputMem = nullptr;
+            }
+        }
+    }
+    const auto cleanupFrameInputMem = [&]() {
+        if (frameInputMem != nullptr) {
+            rknn_destroy_mem(runtime->appCtx.rknn_ctx, frameInputMem);
+            frameInputMem = nullptr;
+        }
+    };
+
+    const bool useFrameDmaBufInput = frameInputMem != nullptr;
+    const bool useIoMem = !useFrameDmaBufInput && runtime->ioMemReady && runtime->inputMem != nullptr
         && inputSize > 0 && static_cast<uint32_t>(inputSize) <= runtime->inputMem->size;
     const bool usePreallocatedOutputs = !useIoMem && runtime->outputPreallocReady
         && runtime->outputBuffers.size() == static_cast<int>(runtime->appCtx.io_num.n_output);
-    poseTimingSample.ioMemPath = useIoMem;
+    poseTimingSample.ioMemPath = useIoMem || useFrameDmaBufInput;
+    poseTimingSample.inputDmaBufPath = useFrameDmaBufInput;
     poseTimingSample.outputPreallocPath = usePreallocatedOutputs;
 
     stageTimer.restart();
-    if (useIoMem) {
-        memcpy(runtime->inputMem->virt_addr, inputBuffer, static_cast<size_t>(inputSize));
-        ret = rknn_mem_sync(runtime->appCtx.rknn_ctx, runtime->inputMem, RKNN_MEMORY_SYNC_TO_DEVICE);
+    if (useFrameDmaBufInput) {
+        ret = rknn_mem_sync(runtime->appCtx.rknn_ctx, frameInputMem, RKNN_MEMORY_SYNC_TO_DEVICE);
+    } else if (useIoMem) {
+        ret = rknn_set_io_mem(runtime->appCtx.rknn_ctx, runtime->inputMem, &inputIoAttr);
+        if (ret >= 0) {
+            memcpy(runtime->inputMem->virt_addr, inputBuffer, static_cast<size_t>(inputSize));
+            ret = rknn_mem_sync(runtime->appCtx.rknn_ctx, runtime->inputMem, RKNN_MEMORY_SYNC_TO_DEVICE);
+        }
     } else {
         rknn_input input;
         memset(&input, 0, sizeof(input));
@@ -414,10 +455,11 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
     poseTimingSample.inputsSetMs = stageTimer.elapsed();
     if (ret < 0) {
         if (error) {
-            *error = useIoMem
+            *error = (useIoMem || useFrameDmaBufInput)
                 ? QStringLiteral("rknn_input_mem_sync_failed_%1").arg(ret)
                 : QStringLiteral("rknn_inputs_set_failed_%1").arg(ret);
         }
+        cleanupFrameInputMem();
         return {};
     }
 
@@ -428,6 +470,7 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
         if (error) {
             *error = QStringLiteral("rknn_run_failed_%1").arg(ret);
         }
+        cleanupFrameInputMem();
         return {};
     }
 
@@ -462,6 +505,7 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
             if (error) {
                 *error = QStringLiteral("rknn_output_mem_sync_failed_%1").arg(ret);
             }
+            cleanupFrameInputMem();
             return {};
         }
     } else {
@@ -472,6 +516,7 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
             if (error) {
                 *error = QStringLiteral("rknn_outputs_get_failed_%1").arg(ret);
             }
+            cleanupFrameInputMem();
             return {};
         }
     }
@@ -489,6 +534,7 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
         rknn_outputs_release(runtime->appCtx.rknn_ctx, runtime->appCtx.io_num.n_output, outputs.data());
     }
     poseTimingSample.postProcessMs = stageTimer.elapsed();
+    cleanupFrameInputMem();
 
     QVector<PosePerson> people;
     for (int i = 0; i < results.count; ++i) {

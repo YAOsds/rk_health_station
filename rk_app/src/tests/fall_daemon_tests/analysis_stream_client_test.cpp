@@ -1,13 +1,29 @@
 #include "analysis/shared_memory_frame_ring.h"
 #include "ingest/analysis_stream_client.h"
 #include "protocol/analysis_frame_descriptor_protocol.h"
+#include "protocol/unix_fd_passing.h"
 
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSignalSpy>
 #include <QtTest/QTest>
 
+#include <fcntl.h>
+#include <linux/memfd.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
 namespace {
+
+int createMemFd(const char *name) {
+#ifdef SYS_memfd_create
+    return static_cast<int>(::syscall(SYS_memfd_create, name, MFD_CLOEXEC));
+#else
+    Q_UNUSED(name);
+    return -1;
+#endif
+}
 AnalysisFrameDescriptor publishPacketDescriptor(
     SharedMemoryFrameRingWriter *writer, const AnalysisFramePacket &packet) {
     const SharedFramePublishResult publish = writer->publish(packet);
@@ -36,6 +52,7 @@ private slots:
     void reconnectsAfterServerRestarts();
     void clearsPartialPacketBufferBeforeReconnect();
     void dropsOversizedDescriptorBuffer();
+    void decodesDmaBufFrameFromSideChannel();
 };
 
 void AnalysisStreamClientTest::decodesIncomingFramePackets() {
@@ -286,6 +303,73 @@ void AnalysisStreamClientTest::dropsOversizedDescriptorBuffer() {
 
     QTRY_VERIFY_WITH_TIMEOUT(socket->state() == QLocalSocket::UnconnectedState, 3000);
     delete socket;
+}
+
+
+void AnalysisStreamClientTest::decodesDmaBufFrameFromSideChannel() {
+    const QString socketName = QStringLiteral("/tmp/rk_video_analysis_dmabuf_test.sock");
+    qputenv("RK_VIDEO_ANALYSIS_TRANSPORT", "dmabuf");
+    QLocalServer::removeServer(socketName);
+    QLocalServer::removeServer(socketName + QStringLiteral(".fd"));
+
+    QLocalServer descriptorServer;
+    QString fdServerError;
+    const int fdServer = createUnixStreamServerSocket(socketName + QStringLiteral(".fd"), &fdServerError);
+    QVERIFY2(fdServer >= 0, qPrintable(fdServerError));
+    QVERIFY(descriptorServer.listen(socketName));
+
+    const int payloadBytes = 4 * 3 * 3;
+    const int fd = createMemFd("rk_analysis_client_dmabuf_test");
+    QVERIFY(fd >= 0);
+    QVERIFY(::ftruncate(fd, payloadBytes) == 0);
+    void *mapped = ::mmap(nullptr, payloadBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    QVERIFY(mapped != MAP_FAILED);
+    memset(mapped, 0x24, payloadBytes);
+    ::munmap(mapped, payloadBytes);
+
+    AnalysisStreamClient client(socketName);
+    QSignalSpy spy(&client, SIGNAL(frameReceived(AnalysisFramePacket)));
+    client.start();
+
+    QTRY_VERIFY_WITH_TIMEOUT(descriptorServer.hasPendingConnections(), 2000);
+    QString acceptError;
+    const int fdClient = acceptUnixStreamClient(fdServer, &acceptError);
+    QVERIFY2(fdClient >= 0, qPrintable(acceptError));
+    QLocalSocket *descriptorSocket = descriptorServer.nextPendingConnection();
+    QVERIFY(descriptorSocket != nullptr);
+
+    AnalysisFrameDescriptor descriptor;
+    descriptor.frameId = 91;
+    descriptor.timestampMs = 1777000000910;
+    descriptor.cameraId = QStringLiteral("front_cam");
+    descriptor.width = 4;
+    descriptor.height = 3;
+    descriptor.pixelFormat = AnalysisPixelFormat::Rgb;
+    descriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
+    descriptor.dmaBufPlaneCount = 1;
+    descriptor.dmaBufOffset = 0;
+    descriptor.dmaBufStrideBytes = 4 * 3;
+    descriptor.payloadBytes = payloadBytes;
+    descriptor.sequence = 1;
+
+    QString fdError;
+    QVERIFY(sendFileDescriptor(fdClient, fd, &fdError));
+    QCOMPARE(fdError, QString());
+    descriptorSocket->write(encodeAnalysisFrameDescriptor(descriptor));
+    descriptorSocket->flush();
+
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 2000);
+    const AnalysisFramePacket decoded = qvariant_cast<AnalysisFramePacket>(spy.takeFirst().at(0));
+    QCOMPARE(decoded.payloadTransport, AnalysisPayloadTransport::DmaBuf);
+    QCOMPARE(decoded.frameId, descriptor.frameId);
+    QCOMPARE(decoded.payload, QByteArray(payloadBytes, '\x24'));
+    QVERIFY(decoded.dmaBufPayload);
+
+    ::close(fd);
+    ::close(fdClient);
+    ::close(fdServer);
+    removeUnixStreamSocket(socketName + QStringLiteral(".fd"));
+    qunsetenv("RK_VIDEO_ANALYSIS_TRANSPORT");
 }
 
 QTEST_MAIN(AnalysisStreamClientTest)

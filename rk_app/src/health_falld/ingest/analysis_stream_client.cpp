@@ -2,15 +2,20 @@
 
 #include "debug/latency_marker_writer.h"
 #include "protocol/analysis_frame_descriptor_protocol.h"
+#include "protocol/unix_fd_passing.h"
 
 #include <QDateTime>
 #include <QLocalSocket>
 #include <QTimer>
 
+#include <poll.h>
+#include <unistd.h>
+
 namespace {
 constexpr int kReconnectDelayMs = 300;
 constexpr int kMaxBufferedBytes = 1024 * 1024;
 const char kFallLatencyMarkerEnvVar[] = "RK_FALL_LATENCY_MARKER_PATH";
+const char kAnalysisTransportEnvVar[] = "RK_VIDEO_ANALYSIS_TRANSPORT";
 }
 
 AnalysisStreamClient::AnalysisStreamClient(
@@ -57,11 +62,21 @@ void AnalysisStreamClient::stop() {
     running_ = false;
     reconnectTimer_->stop();
     socket_->abort();
+    resetFdSocket();
     readBuffer_.clear();
 }
 
 void AnalysisStreamClient::attemptConnect() {
-    if (!running_ || socket_->state() == QLocalSocket::ConnectedState
+    if (!running_) {
+        return;
+    }
+
+    if (dmabufTransportEnabled() && fdSocketFd_ < 0) {
+        QString error;
+        fdSocketFd_ = connectUnixStreamSocket(fdSocketName(), &error);
+    }
+
+    if (socket_->state() == QLocalSocket::ConnectedState
         || socket_->state() == QLocalSocket::ConnectingState) {
         return;
     }
@@ -90,7 +105,31 @@ void AnalysisStreamClient::onReadyRead() {
     while (takeFirstAnalysisFrameDescriptor(&readBuffer_, &descriptor)) {
         AnalysisFramePacket packet;
         QString error;
-        if (!reader_.read(descriptor, &packet, &error)) {
+        bool readOk = false;
+        if (descriptor.payloadTransport == AnalysisPayloadTransport::DmaBuf) {
+            if (!dmabufTransportEnabled()) {
+                qWarning() << "dmabuf disabled";
+                continue;
+            }
+            if (fdSocketFd_ < 0) {
+                continue;
+            }
+            pollfd pollDescriptor{};
+            pollDescriptor.fd = fdSocketFd_;
+            pollDescriptor.events = POLLIN;
+            if (::poll(&pollDescriptor, 1, 500) <= 0) {
+                continue;
+            }
+            const int receivedFd = receiveFileDescriptor(fdSocketFd_, &error);
+            if (receivedFd < 0) {
+                continue;
+            }
+            readOk = dmaBufReader_.read(descriptor, receivedFd, &packet, &error);
+            ::close(receivedFd);
+        } else {
+            readOk = reader_.read(descriptor, &packet, &error);
+        }
+        if (!readOk) {
             continue;
         }
         LatencyMarkerWriter marker(qEnvironmentVariable(kFallLatencyMarkerEnvVar));
@@ -101,5 +140,21 @@ void AnalysisStreamClient::onReadyRead() {
                 {QStringLiteral("frame_id"), QString::number(packet.frameId)},
             });
         emit frameReceived(packet);
+    }
+}
+
+bool AnalysisStreamClient::dmabufTransportEnabled() const {
+    const QByteArray value = qgetenv(kAnalysisTransportEnvVar).trimmed().toLower();
+    return value == "dmabuf" || value == "dma";
+}
+
+QString AnalysisStreamClient::fdSocketName() const {
+    return socketName_ + QStringLiteral(".fd");
+}
+
+void AnalysisStreamClient::resetFdSocket() {
+    if (fdSocketFd_ >= 0) {
+        ::close(fdSocketFd_);
+        fdSocketFd_ = -1;
     }
 }

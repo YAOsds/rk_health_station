@@ -1,9 +1,11 @@
 #include "protocol/unix_fd_passing.h"
 
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <cerrno>
+#include <fcntl.h>
 #include <cstring>
 
 namespace {
@@ -92,4 +94,111 @@ int receiveFileDescriptor(int socketFd, QString *error) {
 
     setError(error, QStringLiteral("fd_passing_missing_descriptor"));
     return -1;
+}
+
+namespace {
+bool fillUnixAddress(const QString &path, sockaddr_un *address, socklen_t *length, QString *error) {
+    const QByteArray encoded = path.toUtf8();
+    if (encoded.isEmpty() || encoded.size() >= static_cast<int>(sizeof(address->sun_path))) {
+        setError(error, QStringLiteral("unix_socket_path_invalid"));
+        return false;
+    }
+
+    memset(address, 0, sizeof(*address));
+    address->sun_family = AF_UNIX;
+    memcpy(address->sun_path, encoded.constData(), static_cast<size_t>(encoded.size() + 1));
+    *length = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + encoded.size() + 1);
+    return true;
+}
+}
+
+int connectUnixStreamSocket(const QString &path, QString *error) {
+    sockaddr_un address{};
+    socklen_t length = 0;
+    if (!fillUnixAddress(path, &address, &length, error)) {
+        return -1;
+    }
+
+#ifdef SOCK_CLOEXEC
+    int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#else
+    int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+#endif
+    if (fd < 0) {
+        setError(error, errnoMessage("unix_socket_create_failed"));
+        return -1;
+    }
+#ifndef SOCK_CLOEXEC
+    ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
+    if (::connect(fd, reinterpret_cast<sockaddr *>(&address), length) != 0) {
+        setError(error, errnoMessage("unix_socket_connect_failed"));
+        ::close(fd);
+        return -1;
+    }
+
+    setError(error, QString());
+    return fd;
+}
+
+int createUnixStreamServerSocket(const QString &path, QString *error) {
+    sockaddr_un address{};
+    socklen_t length = 0;
+    if (!fillUnixAddress(path, &address, &length, error)) {
+        return -1;
+    }
+
+    ::unlink(path.toUtf8().constData());
+#ifdef SOCK_CLOEXEC
+    int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#else
+    int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+#endif
+    if (fd < 0) {
+        setError(error, errnoMessage("unix_socket_create_failed"));
+        return -1;
+    }
+#ifndef SOCK_CLOEXEC
+    ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
+    if (::bind(fd, reinterpret_cast<sockaddr *>(&address), length) != 0) {
+        setError(error, errnoMessage("unix_socket_bind_failed"));
+        ::close(fd);
+        return -1;
+    }
+    if (::listen(fd, 8) != 0) {
+        setError(error, errnoMessage("unix_socket_listen_failed"));
+        ::close(fd);
+        return -1;
+    }
+
+    setError(error, QString());
+    return fd;
+}
+
+int acceptUnixStreamClient(int serverFd, QString *error) {
+    if (serverFd < 0) {
+        setError(error, QStringLiteral("unix_socket_invalid_server_fd"));
+        return -1;
+    }
+#ifdef SOCK_CLOEXEC
+    const int clientFd = ::accept4(serverFd, nullptr, nullptr, SOCK_CLOEXEC);
+#else
+    const int clientFd = ::accept(serverFd, nullptr, nullptr);
+#endif
+    if (clientFd < 0) {
+        setError(error, errnoMessage("unix_socket_accept_failed"));
+        return -1;
+    }
+#ifndef SOCK_CLOEXEC
+    ::fcntl(clientFd, F_SETFD, FD_CLOEXEC);
+#endif
+    setError(error, QString());
+    return clientFd;
+}
+
+void removeUnixStreamSocket(const QString &path) {
+    if (!path.isEmpty()) {
+        ::unlink(path.toUtf8().constData());
+    }
 }

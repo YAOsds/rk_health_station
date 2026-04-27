@@ -7,7 +7,16 @@
 #include <QDateTime>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <linux/dma-heap.h>
 #include <signal.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
 
 namespace {
 const int kStartTimeoutMs = 5000;
@@ -22,6 +31,98 @@ const char kGstLaunchEnvVar[] = "RK_VIDEO_GST_LAUNCH_BIN";
 const char kDefaultGstLaunchBinary[] = "gst-launch-1.0";
 const char kVideoLatencyMarkerEnvVar[] = "RK_VIDEO_LATENCY_MARKER_PATH";
 const char kAnalysisConvertBackendEnvVar[] = "RK_VIDEO_ANALYSIS_CONVERT_BACKEND";
+const char kAnalysisDmaHeapEnvVar[] = "RK_VIDEO_ANALYSIS_DMA_HEAP";
+const char kDefaultAnalysisDmaHeap[] = "/dev/dma_heap/system-uncached-dma32";
+
+
+QString errnoMessage(const char *prefix) {
+    return QStringLiteral("%1_%2_%3")
+        .arg(QString::fromLatin1(prefix))
+        .arg(errno)
+        .arg(QString::fromLocal8Bit(strerror(errno)));
+}
+
+int allocateMemFdBuffer(int bytes, QString *error) {
+#ifdef SYS_memfd_create
+    const int fd = static_cast<int>(::syscall(SYS_memfd_create, "rk_analysis_dmabuf", MFD_CLOEXEC));
+    if (fd < 0) {
+        if (error) {
+            *error = errnoMessage("analysis_memfd_create_failed");
+        }
+        return -1;
+    }
+    if (::ftruncate(fd, bytes) != 0) {
+        if (error) {
+            *error = errnoMessage("analysis_memfd_truncate_failed");
+        }
+        ::close(fd);
+        return -1;
+    }
+    if (error) {
+        error->clear();
+    }
+    return fd;
+#else
+    Q_UNUSED(bytes);
+    if (error) {
+        *error = QStringLiteral("analysis_memfd_unsupported");
+    }
+    return -1;
+#endif
+}
+
+int allocateDmaHeapBuffer(const QString &heapPath, int bytes, QString *error) {
+    if (heapPath == QStringLiteral("memfd")) {
+        return allocateMemFdBuffer(bytes, error);
+    }
+
+    const int heapFd = ::open(heapPath.toUtf8().constData(), O_RDWR | O_CLOEXEC);
+    if (heapFd < 0) {
+        if (error) {
+            *error = errnoMessage("analysis_dma_heap_open_failed");
+        }
+        return -1;
+    }
+
+    dma_heap_allocation_data allocation{};
+    allocation.len = static_cast<__u64>(bytes);
+    allocation.fd_flags = O_RDWR | O_CLOEXEC;
+    allocation.heap_flags = 0;
+    if (::ioctl(heapFd, DMA_HEAP_IOCTL_ALLOC, &allocation) != 0) {
+        if (error) {
+            *error = errnoMessage("analysis_dma_heap_alloc_failed");
+        }
+        ::close(heapFd);
+        return -1;
+    }
+
+    ::close(heapFd);
+    if (error) {
+        error->clear();
+    }
+    return static_cast<int>(allocation.fd);
+}
+
+bool writePayloadToDmaBuffer(int fd, const QByteArray &payload, QString *error) {
+    void *mapped = ::mmap(nullptr, static_cast<size_t>(payload.size()), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mapped == MAP_FAILED) {
+        if (error) {
+            *error = errnoMessage("analysis_dmabuf_mmap_failed");
+        }
+        return false;
+    }
+    memcpy(mapped, payload.constData(), static_cast<size_t>(payload.size()));
+    ::munmap(mapped, static_cast<size_t>(payload.size()));
+    if (error) {
+        error->clear();
+    }
+    return true;
+}
+
+QString analysisDmaHeapPath() {
+    const QString heap = qEnvironmentVariable(kAnalysisDmaHeapEnvVar).trimmed();
+    return heap.isEmpty() ? QString::fromLatin1(kDefaultAnalysisDmaHeap) : heap;
+}
 
 int nv12FrameBytes(int width, int height) {
     return width > 0 && height > 0 ? width * height * 3 / 2 : 0;
@@ -342,11 +443,6 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
 
         if (analysisFrameSource_ && analysisFrameSource_->acceptsFrames(packet.cameraId)
             && pipeline.frameRing) {
-            const SharedFramePublishResult publish = pipeline.frameRing->publish(packet);
-            if (publish.sequence == 0) {
-                continue;
-            }
-
             AnalysisFrameDescriptor descriptor;
             descriptor.frameId = packet.frameId;
             descriptor.timestampMs = packet.timestampMs;
@@ -358,10 +454,45 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
             descriptor.poseXPad = packet.poseXPad;
             descriptor.poseYPad = packet.poseYPad;
             descriptor.poseScale = packet.poseScale;
-            descriptor.slotIndex = publish.slotIndex;
-            descriptor.sequence = publish.sequence;
-            descriptor.payloadBytes = publish.payloadBytes;
-            analysisFrameSource_->publishDescriptor(descriptor);
+            descriptor.payloadBytes = static_cast<quint32>(packet.payload.size());
+
+            bool publishedViaDmaBuf = false;
+            if (analysisFrameSource_->supportsDmaBufFrames()) {
+                QString dmaError;
+                const int dmaFd = allocateDmaHeapBuffer(analysisDmaHeapPath(), packet.payload.size(), &dmaError);
+                if (dmaFd >= 0 && writePayloadToDmaBuffer(dmaFd, packet.payload, &dmaError)) {
+                    descriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
+                    descriptor.dmaBufPlaneCount = 1;
+                    descriptor.dmaBufOffset = 0;
+                    descriptor.dmaBufStrideBytes = static_cast<quint32>(packet.width * 3);
+                    descriptor.sequence = packet.frameId;
+                    analysisFrameSource_->publishDmaBufDescriptor(descriptor, dmaFd);
+                    publishedViaDmaBuf = true;
+                } else {
+                    qWarning().noquote()
+                        << QStringLiteral("video_runtime camera=%1 event=analysis_dmabuf_publish_failed error=%2")
+                               .arg(cameraId)
+                               .arg(dmaError.isEmpty() ? QStringLiteral("unknown") : dmaError);
+                }
+                if (dmaFd >= 0) {
+                    ::close(dmaFd);
+                }
+            }
+
+            if (!publishedViaDmaBuf) {
+                const SharedFramePublishResult publish = pipeline.frameRing->publish(packet);
+                if (publish.sequence == 0) {
+                    continue;
+                }
+                descriptor.payloadTransport = AnalysisPayloadTransport::SharedMemory;
+                descriptor.dmaBufPlaneCount = 0;
+                descriptor.dmaBufOffset = 0;
+                descriptor.dmaBufStrideBytes = 0;
+                descriptor.slotIndex = publish.slotIndex;
+                descriptor.sequence = publish.sequence;
+                descriptor.payloadBytes = publish.payloadBytes;
+                analysisFrameSource_->publishDescriptor(descriptor);
+            }
 
             bool streamConnected = false;
             if (auto *outputBackend = dynamic_cast<AnalysisOutputBackend *>(analysisFrameSource_)) {
@@ -395,6 +526,9 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
                     {QStringLiteral("frame_id"), QString::number(packet.frameId)},
                     {QStringLiteral("slot_index"), static_cast<int>(descriptor.slotIndex)},
                     {QStringLiteral("sequence"), QString::number(descriptor.sequence)},
+                    {QStringLiteral("transport"), descriptor.payloadTransport == AnalysisPayloadTransport::DmaBuf
+                            ? QStringLiteral("dmabuf")
+                            : QStringLiteral("shared_memory")},
                     {QStringLiteral("dropped_frames"),
                         static_cast<double>(pipeline.frameRing->droppedFrames())},
                 });

@@ -1001,6 +1001,7 @@ add_test(NAME track_manager_test COMMAND track_manager_test)
 add_executable(analysis_stream_client_test
     fall_daemon_tests/analysis_stream_client_test.cpp
     ../health_falld/ingest/shared_memory_frame_reader.cpp
+    ../health_falld/ingest/dmabuf_frame_reader.cpp
     ../health_falld/ingest/analysis_stream_client.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp
 )
@@ -1046,6 +1047,28 @@ target_link_libraries(shared_memory_frame_reader_test PRIVATE
 )
 
 add_test(NAME shared_memory_frame_reader_test COMMAND shared_memory_frame_reader_test)
+
+add_executable(dmabuf_frame_reader_test
+    fall_daemon_tests/dmabuf_frame_reader_test.cpp
+    ../health_falld/ingest/dmabuf_frame_reader.cpp
+)
+
+set_target_properties(dmabuf_frame_reader_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(dmabuf_frame_reader_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(dmabuf_frame_reader_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME dmabuf_frame_reader_test COMMAND dmabuf_frame_reader_test)
 
 add_executable(fall_runtime_pose_stub_test
     fall_daemon_tests/fall_runtime_pose_stub_test.cpp
@@ -1248,6 +1271,7 @@ add_executable(fall_end_to_end_status_test
     ../health_falld/domain/fall_event_policy.cpp
     ../health_falld/ingest/analysis_stream_client.cpp
     ../health_falld/ingest/shared_memory_frame_reader.cpp
+    ../health_falld/ingest/dmabuf_frame_reader.cpp
     ../health_falld/ipc/fall_gateway.cpp
     ../health_falld/pose/rknn_pose_estimator.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp

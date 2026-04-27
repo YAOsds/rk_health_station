@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ingest/dmabuf_frame_reader.h"
 #include "ingest/shared_memory_frame_reader.h"
 #include "models/fall_models.h"
 
@@ -26,11 +27,16 @@ private:
     void attemptConnect();
     void scheduleReconnect();
     void onReadyRead();
+    bool dmabufTransportEnabled() const;
+    QString fdSocketName() const;
+    void resetFdSocket();
 
     QString socketName_;
     QLocalSocket *socket_ = nullptr;
+    int fdSocketFd_ = -1;
     QTimer *reconnectTimer_ = nullptr;
     QByteArray readBuffer_;
     SharedMemoryFrameReader reader_;
+    DmaBufFrameReader dmaBufReader_;
     bool running_ = false;
 };

@@ -1,12 +1,17 @@
 #include "analysis/gstreamer_analysis_output_backend.h"
 
 #include "protocol/analysis_frame_descriptor_protocol.h"
+#include "protocol/unix_fd_passing.h"
 
 #include <QLocalServer>
 #include <QLocalSocket>
 
+#include <poll.h>
+#include <unistd.h>
+
 namespace {
 const char kAnalysisSocketEnvVar[] = "RK_VIDEO_ANALYSIS_SOCKET_PATH";
+const char kAnalysisTransportEnvVar[] = "RK_VIDEO_ANALYSIS_TRANSPORT";
 const int kAnalysisFrameWidth = 640;
 const int kAnalysisFrameHeight = 640;
 }
@@ -36,6 +41,12 @@ bool GstreamerAnalysisOutputBackend::start(const VideoChannelStatus &status, QSt
     ensureLocalServer(error);
     if (error && !error->isEmpty()) {
         return false;
+    }
+    if (dmabufTransportEnabled()) {
+        ensureFdServer(error);
+        if (error && !error->isEmpty()) {
+            return false;
+        }
     }
 
     activeCameraId_ = status.cameraId;
@@ -83,6 +94,7 @@ bool GstreamerAnalysisOutputBackend::stop(const QString &cameraId, QString *erro
         localServer_->close();
     }
     QLocalServer::removeServer(socketPath());
+    closeFdServer();
     return true;
 }
 
@@ -95,8 +107,15 @@ bool GstreamerAnalysisOutputBackend::acceptsFrames(const QString &cameraId) cons
     if (cameraId.isEmpty() || cameraId != activeCameraId_ || !localServer_->isListening()) {
         return false;
     }
+    if (dmabufTransportEnabled() && fdServerFd_ < 0) {
+        return false;
+    }
     const AnalysisChannelStatus status = statuses_.value(cameraId);
     return status.cameraId == cameraId && status.enabled;
+}
+
+bool GstreamerAnalysisOutputBackend::supportsDmaBufFrames() const {
+    return dmabufTransportEnabled() && fdServerFd_ >= 0;
 }
 
 void GstreamerAnalysisOutputBackend::publishDescriptor(const AnalysisFrameDescriptor &descriptor) {
@@ -126,6 +145,41 @@ void GstreamerAnalysisOutputBackend::publishDescriptor(const AnalysisFrameDescri
         QLocalSocket *client = clients_.at(i);
         if (!client || client->state() != QLocalSocket::ConnectedState) {
             clients_.removeAt(i);
+            continue;
+        }
+        client->write(encoded);
+        client->flush();
+    }
+}
+
+
+void GstreamerAnalysisOutputBackend::publishDmaBufDescriptor(
+    const AnalysisFrameDescriptor &descriptor, int fd) {
+    if (!acceptsFrames(descriptor.cameraId) || fd < 0) {
+        return;
+    }
+
+    if (localServer_->hasPendingConnections()) {
+        onNewLocalConnection();
+    }
+    acceptPendingFdClients();
+    if (fdClients_.isEmpty()) {
+        return;
+    }
+
+    AnalysisFrameDescriptor dmabufDescriptor = descriptor;
+    dmabufDescriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
+    const QByteArray encoded = encodeAnalysisFrameDescriptor(dmabufDescriptor);
+
+    for (int i = clients_.size() - 1; i >= 0; --i) {
+        QLocalSocket *client = clients_.at(i);
+        if (!client || client->state() != QLocalSocket::ConnectedState) {
+            clients_.removeAt(i);
+            continue;
+        }
+        const int fdClient = i < fdClients_.size() ? fdClients_.at(i) : -1;
+        QString fdError;
+        if (fdClient < 0 || !sendFileDescriptor(fdClient, fd, &fdError)) {
             continue;
         }
         client->write(encoded);
@@ -171,6 +225,58 @@ void GstreamerAnalysisOutputBackend::updateClientState() {
     AnalysisChannelStatus status = statuses_.value(activeCameraId_);
     status.streamConnected = status.enabled && !clients_.isEmpty();
     statuses_.insert(activeCameraId_, status);
+}
+
+
+QString GstreamerAnalysisOutputBackend::fdSocketPath() const {
+    return socketPath() + QStringLiteral(".fd");
+}
+
+bool GstreamerAnalysisOutputBackend::dmabufTransportEnabled() const {
+    const QByteArray value = qgetenv(kAnalysisTransportEnvVar).trimmed().toLower();
+    return value == "dmabuf" || value == "dma";
+}
+
+void GstreamerAnalysisOutputBackend::ensureFdServer(QString *error) {
+    if (error) {
+        error->clear();
+    }
+    if (fdServerFd_ >= 0) {
+        return;
+    }
+    fdServerFd_ = createUnixStreamServerSocket(fdSocketPath(), error);
+}
+
+void GstreamerAnalysisOutputBackend::acceptPendingFdClients() {
+    if (fdServerFd_ < 0) {
+        return;
+    }
+    pollfd descriptor{};
+    descriptor.fd = fdServerFd_;
+    descriptor.events = POLLIN;
+    while (::poll(&descriptor, 1, 0) > 0 && (descriptor.revents & POLLIN) != 0) {
+        QString error;
+        const int clientFd = acceptUnixStreamClient(fdServerFd_, &error);
+        if (clientFd < 0) {
+            return;
+        }
+        fdClients_.append(clientFd);
+        descriptor.revents = 0;
+    }
+}
+
+void GstreamerAnalysisOutputBackend::closeFdServer() {
+    for (int fd : fdClients_) {
+        if (fd >= 0) {
+            ::close(fd);
+        }
+    }
+    fdClients_.clear();
+    if (fdServerFd_ >= 0) {
+        ::close(fdServerFd_);
+        fdServerFd_ = -1;
+    }
+    removeUnixStreamSocket(fdSocketPath());
 }
 
 AnalysisChannelStatus GstreamerAnalysisOutputBackend::defaultStatusForCamera(const QString &cameraId) const {

@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QMetaType>
+#include <QSharedPointer>
 #include <QString>
 #include <QVector>
 
@@ -15,6 +16,20 @@ enum class AnalysisPayloadTransport {
     SharedMemory = 0,
     DmaBuf = 1,
 };
+
+struct AnalysisDmaBufPayload {
+    ~AnalysisDmaBufPayload();
+
+    int fd = -1;
+    void *mapped = nullptr;
+    qsizetype mappedBytes = 0;
+    qsizetype offset = 0;
+    qsizetype payloadBytes = 0;
+
+    const char *data() const;
+};
+
+using AnalysisDmaBufPayloadPtr = QSharedPointer<AnalysisDmaBufPayload>;
 
 struct AnalysisFramePacket {
     quint64 frameId = 0;
@@ -31,6 +46,7 @@ struct AnalysisFramePacket {
     quint32 dmaBufPlaneCount = 0;
     quint32 dmaBufOffset = 0;
     quint32 dmaBufStrideBytes = 0;
+    AnalysisDmaBufPayloadPtr dmaBufPayload;
     QByteArray payload;
 };
 

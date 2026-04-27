@@ -11,6 +11,11 @@ enum class AnalysisPixelFormat {
     Rgb = 2,
 };
 
+enum class AnalysisPayloadTransport {
+    SharedMemory = 0,
+    DmaBuf = 1,
+};
+
 struct AnalysisFramePacket {
     quint64 frameId = 0;
     qint64 timestampMs = 0;
@@ -22,6 +27,10 @@ struct AnalysisFramePacket {
     qint32 poseXPad = 0;
     qint32 poseYPad = 0;
     float poseScale = 1.0f;
+    AnalysisPayloadTransport payloadTransport = AnalysisPayloadTransport::SharedMemory;
+    quint32 dmaBufPlaneCount = 0;
+    quint32 dmaBufOffset = 0;
+    quint32 dmaBufStrideBytes = 0;
     QByteArray payload;
 };
 
@@ -36,6 +45,10 @@ struct AnalysisFrameDescriptor {
     qint32 poseXPad = 0;
     qint32 poseYPad = 0;
     float poseScale = 1.0f;
+    AnalysisPayloadTransport payloadTransport = AnalysisPayloadTransport::SharedMemory;
+    quint32 dmaBufPlaneCount = 0;
+    quint32 dmaBufOffset = 0;
+    quint32 dmaBufStrideBytes = 0;
     quint32 slotIndex = 0;
     quint64 sequence = 0;
     quint32 payloadBytes = 0;

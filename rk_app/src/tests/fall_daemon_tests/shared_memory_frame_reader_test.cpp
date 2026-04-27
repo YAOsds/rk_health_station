@@ -12,6 +12,8 @@ class SharedMemoryFrameReaderTest : public QObject {
 
 private slots:
     void rejectsDescriptorForOverwrittenSlot();
+    void rejectsDmaBufDescriptorBeforeOpeningSharedMemory();
+    void clearsPacketTransportMetadataForSharedMemoryRead();
     void remapsWhenRingIsRecreatedForSameCamera();
     void rejectsRingHeaderThatExceedsMappedSize();
     void rejectsMappingSmallerThanRingHeader();
@@ -53,6 +55,71 @@ void SharedMemoryFrameReaderTest::rejectsDescriptorForOverwrittenSlot() {
     QString error;
     QVERIFY(!reader.read(descriptor, &decoded, &error));
     QCOMPARE(error, QStringLiteral("analysis_slot_overwritten"));
+}
+
+void SharedMemoryFrameReaderTest::rejectsDmaBufDescriptorBeforeOpeningSharedMemory() {
+    SharedMemoryFrameReader reader(QStringLiteral("/rk_missing_for_dmabuf_test"));
+
+    AnalysisFrameDescriptor descriptor;
+    descriptor.frameId = 1;
+    descriptor.timestampMs = 10;
+    descriptor.cameraId = QStringLiteral("front_cam");
+    descriptor.width = 4;
+    descriptor.height = 4;
+    descriptor.pixelFormat = AnalysisPixelFormat::Rgb;
+    descriptor.slotIndex = 0;
+    descriptor.sequence = 2;
+    descriptor.payloadBytes = 4 * 4 * 3;
+    descriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
+    descriptor.dmaBufPlaneCount = 1;
+    descriptor.dmaBufOffset = 0;
+    descriptor.dmaBufStrideBytes = 4 * 3;
+
+    AnalysisFramePacket decoded;
+    QString error;
+    QVERIFY(!reader.read(descriptor, &decoded, &error));
+    QCOMPARE(error, QStringLiteral("analysis_payload_transport_unsupported"));
+}
+
+void SharedMemoryFrameReaderTest::clearsPacketTransportMetadataForSharedMemoryRead() {
+    SharedMemoryFrameRingWriter writer(QStringLiteral("front_cam"), 1, 4 * 4 * 3);
+    QVERIFY(writer.initialize());
+
+    AnalysisFramePacket frame;
+    frame.frameId = 3;
+    frame.timestampMs = 30;
+    frame.cameraId = QStringLiteral("front_cam");
+    frame.width = 4;
+    frame.height = 4;
+    frame.pixelFormat = AnalysisPixelFormat::Rgb;
+    frame.payload = QByteArray(4 * 4 * 3, '\x33');
+
+    const SharedFramePublishResult publish = writer.publish(frame);
+
+    AnalysisFrameDescriptor descriptor;
+    descriptor.frameId = frame.frameId;
+    descriptor.timestampMs = frame.timestampMs;
+    descriptor.cameraId = frame.cameraId;
+    descriptor.width = frame.width;
+    descriptor.height = frame.height;
+    descriptor.pixelFormat = frame.pixelFormat;
+    descriptor.slotIndex = publish.slotIndex;
+    descriptor.sequence = publish.sequence;
+    descriptor.payloadBytes = frame.payload.size();
+
+    AnalysisFramePacket decoded;
+    decoded.payloadTransport = AnalysisPayloadTransport::DmaBuf;
+    decoded.dmaBufPlaneCount = 1;
+    decoded.dmaBufOffset = 8;
+    decoded.dmaBufStrideBytes = 128;
+
+    SharedMemoryFrameReader reader;
+    QString error;
+    QVERIFY(reader.read(descriptor, &decoded, &error));
+    QCOMPARE(decoded.payloadTransport, AnalysisPayloadTransport::SharedMemory);
+    QCOMPARE(decoded.dmaBufPlaneCount, 0u);
+    QCOMPARE(decoded.dmaBufOffset, 0u);
+    QCOMPARE(decoded.dmaBufStrideBytes, 0u);
 }
 
 void SharedMemoryFrameReaderTest::remapsWhenRingIsRecreatedForSameCamera() {
@@ -124,7 +191,6 @@ void SharedMemoryFrameReaderTest::remapsWhenRingIsRecreatedForSameCamera() {
     QCOMPARE(decoded.timestampMs, second.timestampMs);
     QCOMPARE(decoded.payload, second.payload);
 }
-
 
 void SharedMemoryFrameReaderTest::rejectsMappingSmallerThanRingHeader() {
     const QString shmName = QStringLiteral("/rk_reader_short_header_test");

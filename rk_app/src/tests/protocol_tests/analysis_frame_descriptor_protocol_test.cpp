@@ -10,6 +10,7 @@ private slots:
     void roundTripsDescriptor();
     void rejectsInvalidSlotIndex();
     void roundTripsPosePreprocessMetadata();
+    void roundTripsDmaBufTransportMetadata();
 };
 
 void AnalysisFrameDescriptorProtocolTest::roundTripsDescriptor() {
@@ -55,6 +56,31 @@ void AnalysisFrameDescriptorProtocolTest::roundTripsPosePreprocessMetadata() {
     QCOMPARE(decoded.poseXPad, 0);
     QCOMPARE(decoded.poseYPad, 80);
     QCOMPARE(decoded.poseScale, 1.0f);
+}
+
+void AnalysisFrameDescriptorProtocolTest::roundTripsDmaBufTransportMetadata() {
+    AnalysisFrameDescriptor descriptor;
+    descriptor.frameId = 120;
+    descriptor.timestampMs = 1777000000444;
+    descriptor.cameraId = QStringLiteral("front_cam");
+    descriptor.width = 640;
+    descriptor.height = 640;
+    descriptor.pixelFormat = AnalysisPixelFormat::Rgb;
+    descriptor.slotIndex = 4;
+    descriptor.sequence = 30;
+    descriptor.payloadBytes = 640 * 640 * 3;
+    descriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
+    descriptor.dmaBufPlaneCount = 1;
+    descriptor.dmaBufOffset = 0;
+    descriptor.dmaBufStrideBytes = 640 * 3;
+
+    const QByteArray encoded = encodeAnalysisFrameDescriptor(descriptor);
+    AnalysisFrameDescriptor decoded;
+    QVERIFY(decodeAnalysisFrameDescriptor(encoded, &decoded));
+    QCOMPARE(decoded.payloadTransport, AnalysisPayloadTransport::DmaBuf);
+    QCOMPARE(decoded.dmaBufPlaneCount, 1u);
+    QCOMPARE(decoded.dmaBufOffset, 0u);
+    QCOMPARE(decoded.dmaBufStrideBytes, 640u * 3u);
 }
 
 void AnalysisFrameDescriptorProtocolTest::rejectsInvalidSlotIndex() {

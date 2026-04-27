@@ -4,7 +4,7 @@
 
 namespace {
 constexpr quint32 kDescriptorMagic = 0x524B4144; // RKAD
-constexpr quint16 kDescriptorVersion = 2;
+constexpr quint16 kDescriptorVersion = 3;
 constexpr quint32 kMaxDescriptorSlotIndex = 64;
 
 bool isKnownPixelFormat(qint32 value) {
@@ -15,6 +15,29 @@ bool isKnownPixelFormat(qint32 value) {
         return true;
     }
     return false;
+}
+
+bool isKnownPayloadTransport(qint32 value) {
+    switch (static_cast<AnalysisPayloadTransport>(value)) {
+    case AnalysisPayloadTransport::SharedMemory:
+    case AnalysisPayloadTransport::DmaBuf:
+        return true;
+    }
+    return false;
+}
+
+bool hasValidDmaBufMetadata(const AnalysisFrameDescriptor &descriptor) {
+    if (descriptor.payloadTransport == AnalysisPayloadTransport::SharedMemory) {
+        return descriptor.dmaBufPlaneCount == 0 && descriptor.dmaBufOffset == 0
+            && descriptor.dmaBufStrideBytes == 0;
+    }
+    if (descriptor.dmaBufPlaneCount == 0 || descriptor.dmaBufPlaneCount > 4) {
+        return false;
+    }
+    if (descriptor.dmaBufStrideBytes == 0 || descriptor.dmaBufOffset >= descriptor.payloadBytes) {
+        return false;
+    }
+    return true;
 }
 
 bool hasValidDescriptorShape(const AnalysisFrameDescriptor &descriptor) {
@@ -31,10 +54,21 @@ bool hasValidDescriptorShape(const AnalysisFrameDescriptor &descriptor) {
         return false;
     }
 
+    if (!hasValidDmaBufMetadata(descriptor)) {
+        return false;
+    }
+
     switch (descriptor.pixelFormat) {
     case AnalysisPixelFormat::Rgb:
+        if (descriptor.payloadTransport == AnalysisPayloadTransport::DmaBuf) {
+            return descriptor.dmaBufStrideBytes >= static_cast<quint32>(descriptor.width * 3)
+                && descriptor.payloadBytes >= static_cast<quint32>(descriptor.dmaBufStrideBytes * descriptor.height);
+        }
         return descriptor.payloadBytes == static_cast<quint32>(pixelCount * 3);
     case AnalysisPixelFormat::Nv12:
+        if (descriptor.payloadTransport == AnalysisPayloadTransport::DmaBuf) {
+            return descriptor.payloadBytes >= static_cast<quint32>(pixelCount * 3 / 2);
+        }
         return descriptor.payloadBytes == static_cast<quint32>(pixelCount * 3 / 2);
     case AnalysisPixelFormat::Jpeg:
         return descriptor.payloadBytes > 0;
@@ -58,6 +92,10 @@ QByteArray encodeAnalysisFrameDescriptorPayload(const AnalysisFrameDescriptor &d
            << descriptor.poseXPad
            << descriptor.poseYPad
            << descriptor.poseScale
+           << static_cast<qint32>(descriptor.payloadTransport)
+           << descriptor.dmaBufPlaneCount
+           << descriptor.dmaBufOffset
+           << descriptor.dmaBufStrideBytes
            << descriptor.slotIndex
            << descriptor.sequence
            << descriptor.payloadBytes;
@@ -76,6 +114,7 @@ bool decodeAnalysisFrameDescriptorPayload(
     quint32 magic = 0;
     quint16 version = 0;
     qint32 pixelFormatValue = 0;
+    qint32 payloadTransportValue = static_cast<qint32>(AnalysisPayloadTransport::SharedMemory);
 
     stream >> magic
            >> version
@@ -87,7 +126,7 @@ bool decodeAnalysisFrameDescriptorPayload(
            >> pixelFormatValue;
 
     if (stream.status() != QDataStream::Ok || magic != kDescriptorMagic
-        || (version != 1 && version != kDescriptorVersion)) {
+        || (version < 1 || version > kDescriptorVersion)) {
         return false;
     }
 
@@ -95,11 +134,21 @@ bool decodeAnalysisFrameDescriptorPayload(
     descriptor->poseXPad = 0;
     descriptor->poseYPad = 0;
     descriptor->poseScale = 1.0f;
+    descriptor->payloadTransport = AnalysisPayloadTransport::SharedMemory;
+    descriptor->dmaBufPlaneCount = 0;
+    descriptor->dmaBufOffset = 0;
+    descriptor->dmaBufStrideBytes = 0;
     if (version >= 2) {
         stream >> descriptor->posePreprocessed
                >> descriptor->poseXPad
                >> descriptor->poseYPad
                >> descriptor->poseScale;
+    }
+    if (version >= 3) {
+        stream >> payloadTransportValue
+               >> descriptor->dmaBufPlaneCount
+               >> descriptor->dmaBufOffset
+               >> descriptor->dmaBufStrideBytes;
     }
 
     stream >> descriptor->slotIndex
@@ -109,11 +158,12 @@ bool decodeAnalysisFrameDescriptorPayload(
     if (stream.status() != QDataStream::Ok) {
         return false;
     }
-    if (!isKnownPixelFormat(pixelFormatValue)) {
+    if (!isKnownPixelFormat(pixelFormatValue) || !isKnownPayloadTransport(payloadTransportValue)) {
         return false;
     }
 
     descriptor->pixelFormat = static_cast<AnalysisPixelFormat>(pixelFormatValue);
+    descriptor->payloadTransport = static_cast<AnalysisPayloadTransport>(payloadTransportValue);
     return hasValidDescriptorShape(*descriptor);
 }
 } // namespace

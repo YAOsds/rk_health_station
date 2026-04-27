@@ -24,6 +24,12 @@ bool SharedMemoryFrameReader::read(
         }
         return false;
     }
+    if (descriptor.payloadTransport != AnalysisPayloadTransport::SharedMemory) {
+        if (error) {
+            *error = QStringLiteral("analysis_payload_transport_unsupported");
+        }
+        return false;
+    }
     if (!ensureMapped(descriptor.cameraId, error)) {
         return false;
     }
@@ -66,6 +72,10 @@ bool SharedMemoryFrameReader::read(
     packet->poseXPad = slotHeader->poseXPad;
     packet->poseYPad = slotHeader->poseYPad;
     packet->poseScale = slotHeader->poseScale;
+    packet->payloadTransport = AnalysisPayloadTransport::SharedMemory;
+    packet->dmaBufPlaneCount = 0;
+    packet->dmaBufOffset = 0;
+    packet->dmaBufStrideBytes = 0;
     packet->payload = QByteArray(slotPayloadFor(descriptor.slotIndex), slotHeader->payloadBytes);
 
     const quint64 secondSequence = __atomic_load_n(&slotHeader->sequence, __ATOMIC_ACQUIRE);

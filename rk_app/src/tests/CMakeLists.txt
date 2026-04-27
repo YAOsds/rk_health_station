@@ -89,6 +89,21 @@ target_link_libraries(latency_marker_writer_test PRIVATE
 
 add_test(NAME latency_marker_writer_test COMMAND latency_marker_writer_test)
 
+add_executable(unix_fd_passing_test
+    protocol_tests/unix_fd_passing_test.cpp
+)
+
+set_target_properties(unix_fd_passing_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(unix_fd_passing_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME unix_fd_passing_test COMMAND unix_fd_passing_test)
+
 add_executable(fall_protocol_test
     protocol_tests/fall_protocol_test.cpp
 )

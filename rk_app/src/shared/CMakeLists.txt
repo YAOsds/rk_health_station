@@ -14,6 +14,7 @@ add_library(rk_shared STATIC
     debug/latency_marker_writer.cpp
     protocol/device_frame.cpp
     protocol/ipc_message.cpp
+    protocol/unix_fd_passing.cpp
     protocol/analysis_stream_protocol.cpp
     protocol/analysis_frame_descriptor_protocol.cpp
     protocol/fall_ipc.cpp

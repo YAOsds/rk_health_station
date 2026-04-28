@@ -18,6 +18,7 @@ endif()
 include(CTest)
 
 option(RKAPP_ENABLE_RGA_ANALYSIS_CONVERT "Use RK RGA for analysis NV12 to RGB conversion" OFF)
+option(RKAPP_ENABLE_INPROCESS_GSTREAMER "Use in-process GStreamer appsink backend" OFF)
 
 if(BUILD_TESTING)
     if(RK_QT_MAJOR EQUAL 6)

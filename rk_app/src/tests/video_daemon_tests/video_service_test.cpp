@@ -21,18 +21,21 @@ public:
         *previewUrl = QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview");
         error->clear();
         previewRunning = true;
+        startPreviewCalls += 1;
         return true;
     }
 
     bool stopPreview(const QString &, QString *error) override {
         previewRunning = false;
         error->clear();
+        stopPreviewCalls += 1;
         return true;
     }
 
     bool captureSnapshot(const VideoChannelStatus &, const QString &outputPath, QString *error) override {
         lastSnapshotPath = outputPath;
         error->clear();
+        captureSnapshotCalls += 1;
         return true;
     }
 
@@ -40,12 +43,14 @@ public:
         activeRecordPath = outputPath;
         previewRunning = true;
         error->clear();
+        startRecordingCalls += 1;
         return true;
     }
 
     bool stopRecording(const QString &, QString *error) override {
         activeRecordPath.clear();
         error->clear();
+        stopRecordingCalls += 1;
         return true;
     }
 
@@ -58,6 +63,11 @@ public:
     bool previewRunning = false;
     QString activeRecordPath;
     QString lastSnapshotPath;
+    int startPreviewCalls = 0;
+    int stopPreviewCalls = 0;
+    int captureSnapshotCalls = 0;
+    int startRecordingCalls = 0;
+    int stopRecordingCalls = 0;
 
 private:
     VideoPipelineObserver *observer_ = nullptr;
@@ -73,6 +83,8 @@ private slots:
     void startsRecordingAndUpdatesStatus();
     void stopsRecordingAndReturnsToPreviewing();
     void capturesSnapshotAndReturnsAbsolutePath();
+    void capturesSnapshotWithoutRestartingPreview();
+    void startsRecordingWithoutStoppingPreview();
     void startsTestInputAndDisablesCameraOnlyOperations();
     void writesPlaybackStartMarkerWhenTestInputStarts();
     void keepsTestModeAfterPlaybackFinished();
@@ -132,6 +144,53 @@ void VideoServiceTest::capturesSnapshotAndReturnsAbsolutePath() {
     QVERIFY(QFileInfo(path).isAbsolute());
     QVERIFY(path.endsWith(QStringLiteral(".jpg")));
     QCOMPARE(backend.lastSnapshotPath, path);
+}
+
+void VideoServiceTest::capturesSnapshotWithoutRestartingPreview() {
+    FakeVideoPipelineBackend backend;
+    VideoService service(&backend);
+
+    QVERIFY(service.startPreview(QStringLiteral("front_cam")).ok);
+    QCOMPARE(backend.startPreviewCalls, 1);
+    QCOMPARE(backend.stopPreviewCalls, 0);
+
+    const VideoCommandResult result = service.takeSnapshot(QStringLiteral("front_cam"));
+    QVERIFY(result.ok);
+    QCOMPARE(backend.captureSnapshotCalls, 1);
+    QCOMPARE(backend.stopPreviewCalls, 0);
+    QCOMPARE(backend.startPreviewCalls, 1);
+
+    const VideoChannelStatus status = service.statusForCamera(QStringLiteral("front_cam"));
+    QCOMPARE(status.cameraState, VideoCameraState::Previewing);
+    QCOMPARE(status.previewUrl,
+        QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview"));
+}
+
+void VideoServiceTest::startsRecordingWithoutStoppingPreview() {
+    FakeVideoPipelineBackend backend;
+    VideoService service(&backend);
+
+    QVERIFY(service.startPreview(QStringLiteral("front_cam")).ok);
+    QCOMPARE(backend.startPreviewCalls, 1);
+    QCOMPARE(backend.stopPreviewCalls, 0);
+
+    const VideoCommandResult result = service.startRecording(QStringLiteral("front_cam"));
+    QVERIFY(result.ok);
+    QCOMPARE(backend.startRecordingCalls, 1);
+    QCOMPARE(backend.stopPreviewCalls, 0);
+
+    const VideoChannelStatus recordingStatus = service.statusForCamera(QStringLiteral("front_cam"));
+    QCOMPARE(recordingStatus.cameraState, VideoCameraState::Recording);
+    QCOMPARE(recordingStatus.previewUrl,
+        QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview"));
+
+    QVERIFY(service.stopRecording(QStringLiteral("front_cam")).ok);
+    QCOMPARE(backend.stopRecordingCalls, 1);
+
+    const VideoChannelStatus stoppedStatus = service.statusForCamera(QStringLiteral("front_cam"));
+    QCOMPARE(stoppedStatus.cameraState, VideoCameraState::Previewing);
+    QCOMPARE(stoppedStatus.previewUrl,
+        QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview"));
 }
 
 void VideoServiceTest::startsTestInputAndDisablesCameraOnlyOperations() {

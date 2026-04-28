@@ -52,10 +52,26 @@ target_link_libraries(health-videod PRIVATE
 
 target_compile_definitions(health-videod PRIVATE
     RKAPP_ENABLE_RGA_ANALYSIS_CONVERT=$<IF:$<BOOL:${RKAPP_ENABLE_RGA_ANALYSIS_CONVERT}>,1,0>
+    RKAPP_ENABLE_INPROCESS_GSTREAMER=$<IF:$<BOOL:${RKAPP_ENABLE_INPROCESS_GSTREAMER}>,1,0>
 )
 
 if(RKAPP_ENABLE_RGA_ANALYSIS_CONVERT)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBRGA REQUIRED IMPORTED_TARGET librga)
     target_link_libraries(health-videod PRIVATE PkgConfig::LIBRGA)
+endif()
+
+if(RKAPP_ENABLE_INPROCESS_GSTREAMER)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
+        gstreamer-1.0
+        gstreamer-app-1.0
+        gstreamer-video-1.0
+        gstreamer-allocators-1.0
+    )
+    target_sources(health-videod PRIVATE
+        pipeline/inprocess_gstreamer_pipeline.cpp
+        pipeline/inprocess_gstreamer_pipeline.h
+    )
+    target_link_libraries(health-videod PRIVATE PkgConfig::GSTREAMER)
 endif()

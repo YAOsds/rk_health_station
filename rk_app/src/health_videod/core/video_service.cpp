@@ -108,19 +108,6 @@ VideoCommandResult VideoService::takeSnapshot(const QString &cameraId) {
             cameraId, QStringLiteral("take_snapshot"), QStringLiteral("storage_dir_invalid"));
     }
 
-    const bool restartPreview = !channel.previewUrl.isEmpty();
-    if (restartPreview) {
-        QString stopError;
-        if (!pipelineBackend_->stopPreview(cameraId, &stopError)) {
-            channel.lastError = stopError;
-            channel.cameraState = VideoCameraState::Error;
-            return buildErrorResult(cameraId, QStringLiteral("take_snapshot"),
-                QStringLiteral("preview_stop_failed"));
-        }
-        channel.previewUrl.clear();
-        channel.cameraState = VideoCameraState::Idle;
-    }
-
     const QString outputPath = nextSnapshotPath(channel.storageDir);
     QString error;
     if (!pipelineBackend_->captureSnapshot(channel, outputPath, &error)) {
@@ -132,11 +119,6 @@ VideoCommandResult VideoService::takeSnapshot(const QString &cameraId) {
 
     channel.lastSnapshotPath = outputPath;
     channel.lastError.clear();
-
-    if (restartPreview) {
-        QString previewError;
-        ensurePreview(cameraId, &previewError);
-    }
 
     QJsonObject payload;
     payload.insert(QStringLiteral("snapshot_path"), outputPath);
@@ -169,14 +151,6 @@ VideoCommandResult VideoService::startRecording(const QString &cameraId) {
     QString previewError;
     if (!ensurePreview(cameraId, &previewError)) {
         return buildErrorResult(cameraId, QStringLiteral("start_recording"), previewError);
-    }
-
-    QString stopError;
-    if (!pipelineBackend_->stopPreview(cameraId, &stopError)) {
-        channel.lastError = stopError;
-        channel.cameraState = VideoCameraState::Error;
-        return buildErrorResult(cameraId, QStringLiteral("start_recording"),
-            QStringLiteral("preview_stop_failed"));
     }
 
     const QString outputPath = nextRecordPath(channel.storageDir);
@@ -225,18 +199,14 @@ VideoCommandResult VideoService::stopRecording(const QString &cameraId) {
 
     channel.recording = false;
     channel.lastError.clear();
-    channel.previewUrl.clear();
-    channel.cameraState = VideoCameraState::Idle;
+    channel.cameraState = channel.previewUrl.isEmpty()
+        ? VideoCameraState::Idle
+        : VideoCameraState::Previewing;
 
     qInfo().noquote()
         << QStringLiteral("video_runtime camera=%1 event=recording_stopped path=%2")
                .arg(cameraId)
                .arg(channel.currentRecordPath);
-
-    QString previewError;
-    if (!ensurePreview(cameraId, &previewError)) {
-        return buildErrorResult(cameraId, QStringLiteral("stop_recording"), previewError);
-    }
 
     QJsonObject payload;
     payload.insert(QStringLiteral("record_path"), channel.currentRecordPath);

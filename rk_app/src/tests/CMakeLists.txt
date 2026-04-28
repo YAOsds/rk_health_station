@@ -708,7 +708,27 @@ target_include_directories(gstreamer_video_pipeline_backend_test PRIVATE
 target_link_libraries(gstreamer_video_pipeline_backend_test PRIVATE
     rk_shared
     ${RK_QT_TEST_TARGET}
+    ${RK_QT_NETWORK_TARGET}
 )
+
+target_compile_definitions(gstreamer_video_pipeline_backend_test PRIVATE
+    RKAPP_ENABLE_INPROCESS_GSTREAMER=$<IF:$<BOOL:${RKAPP_ENABLE_INPROCESS_GSTREAMER}>,1,0>
+)
+
+if(RKAPP_ENABLE_INPROCESS_GSTREAMER)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
+        gstreamer-1.0
+        gstreamer-app-1.0
+        gstreamer-video-1.0
+        gstreamer-allocators-1.0
+    )
+    target_sources(gstreamer_video_pipeline_backend_test PRIVATE
+        ../health_videod/pipeline/inprocess_gstreamer_pipeline.cpp
+        ../health_videod/pipeline/inprocess_gstreamer_pipeline.h
+    )
+    target_link_libraries(gstreamer_video_pipeline_backend_test PRIVATE PkgConfig::GSTREAMER)
+endif()
 
 add_test(NAME gstreamer_video_pipeline_backend_test COMMAND gstreamer_video_pipeline_backend_test)
 

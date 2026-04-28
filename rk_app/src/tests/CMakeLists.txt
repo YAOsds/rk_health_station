@@ -119,6 +119,30 @@ target_link_libraries(fall_protocol_test PRIVATE
 
 add_test(NAME fall_protocol_test COMMAND fall_protocol_test)
 
+add_executable(app_runtime_config_test
+    shared_tests/app_runtime_config_test.cpp
+    ../shared/runtime_config/app_runtime_config.cpp
+    ../shared/runtime_config/app_runtime_config_loader.cpp
+    ../shared/runtime_config/app_runtime_config_validator.cpp
+    ../shared/runtime_config/app_runtime_config_paths.cpp
+)
+
+set_target_properties(app_runtime_config_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(app_runtime_config_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(app_runtime_config_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME app_runtime_config_test COMMAND app_runtime_config_test)
+
 add_executable(action_classifier_factory_test
     fall_daemon_tests/action_classifier_factory_test.cpp
     ../health_falld/action/action_classifier_factory.cpp

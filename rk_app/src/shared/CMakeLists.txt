@@ -22,6 +22,10 @@ add_library(rk_shared STATIC
     protocol/video_ipc.cpp
     security/hmac_helper.cpp
     storage/database.cpp
+    runtime_config/app_runtime_config.cpp
+    runtime_config/app_runtime_config_loader.cpp
+    runtime_config/app_runtime_config_validator.cpp
+    runtime_config/app_runtime_config_paths.cpp
 )
 
 target_include_directories(rk_shared PUBLIC

@@ -32,6 +32,7 @@ endif()
 
 add_subdirectory(src/shared)
 add_subdirectory(src/healthd)
+add_subdirectory(src/health_config_ui)
 add_subdirectory(src/health_ui)
 add_subdirectory(src/health_videod)
 add_subdirectory(src/health_falld)

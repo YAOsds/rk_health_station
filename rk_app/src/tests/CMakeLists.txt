@@ -547,6 +547,32 @@ target_link_libraries(health_ui_smoke_test PRIVATE
 
 add_test(NAME health_ui_smoke_test COMMAND health_ui_smoke_test)
 
+add_executable(health_config_ui_test
+    ui_tests/health_config_ui_test.cpp
+    ../health_config_ui/app/config_editor_app.cpp
+    ../health_config_ui/widgets/config_editor_window.cpp
+    ../health_config_ui/widgets/config_section_widget.cpp
+)
+
+set_target_properties(health_config_ui_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(health_config_ui_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_config_ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(health_config_ui_test PRIVATE
+    rk_shared
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_WIDGETS_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME health_config_ui_test COMMAND health_config_ui_test)
+
 add_executable(dashboard_page_test
     ui_tests/dashboard_page_test.cpp
     ../health_ui/pages/dashboard_page.cpp

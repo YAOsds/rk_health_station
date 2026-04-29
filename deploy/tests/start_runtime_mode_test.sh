@@ -26,19 +26,21 @@ mkdir -p \
   "${TMP_ROOT}/scripts" \
   "${TMP_ROOT}/logs" \
   "${TMP_ROOT}/run" \
-  "${TMP_ROOT}/data"
+  "${TMP_ROOT}/data" \
+  "${TMP_ROOT}/config"
 
 cp "${SOURCE_BUNDLE_DIR}/start.sh" "${TMP_ROOT}/scripts/start.sh"
 cp "${SOURCE_BUNDLE_DIR}/stop.sh" "${TMP_ROOT}/scripts/stop.sh"
 cp "${SOURCE_BUNDLE_DIR}/status.sh" "${TMP_ROOT}/scripts/status.sh"
+cp "${PROJECT_ROOT}/deploy/config/runtime_config.json" "${TMP_ROOT}/config/runtime_config.json"
 chmod +x "${TMP_ROOT}/scripts/"*.sh
 
-cat > "${TMP_ROOT}/bin/healthd" <<'EOF'
+cat > "${TMP_ROOT}/bin/healthd" <<'INNER_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
 env | sort > "${HEALTHD_ENV_CAPTURE:?}"
-exec python3 - "${RK_HEALTH_STATION_SOCKET_NAME:?}" <<'PY'
+exec python3 - "${PWD}/run/rk_health_station.sock" <<'PY'
 import os
 import socket
 import sys
@@ -55,22 +57,22 @@ sock.bind(path)
 sock.listen(1)
 time.sleep(30)
 PY
-EOF
+INNER_EOF
 
-cat > "${TMP_ROOT}/bin/health-ui" <<'EOF'
+cat > "${TMP_ROOT}/bin/health-ui" <<'INNER_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
 env | sort > "${UI_ENV_CAPTURE:?}"
 exec sleep 30
-EOF
+INNER_EOF
 
-cat > "${TMP_ROOT}/bin/health-videod" <<'EOF'
+cat > "${TMP_ROOT}/bin/health-videod" <<'INNER_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
 exec sleep 30
-EOF
+INNER_EOF
 
 chmod +x "${TMP_ROOT}/bin/healthd" "${TMP_ROOT}/bin/health-ui" "${TMP_ROOT}/bin/health-videod"
 
@@ -123,8 +125,10 @@ run_case() {
   wait_for_file "${TMP_ROOT}/healthd.env"
   wait_for_file "${TMP_ROOT}/ui.env"
 
-  assert_contains "${TMP_ROOT}/healthd.env" "HEALTHD_DB_PATH=${TMP_ROOT}/data/healthd.sqlite"
-  assert_contains "${TMP_ROOT}/healthd.env" "RK_HEALTH_STATION_SOCKET_NAME=${TMP_ROOT}/run/rk_health_station.sock"
+  assert_contains "${TMP_ROOT}/healthd.env" "RK_APP_CONFIG_PATH=${TMP_ROOT}/config/runtime_config.json"
+  assert_missing_prefix "${TMP_ROOT}/healthd.env" "HEALTHD_DB_PATH="
+  assert_missing_prefix "${TMP_ROOT}/healthd.env" "RK_HEALTH_STATION_SOCKET_NAME="
+  assert_missing_prefix "${TMP_ROOT}/healthd.env" "RK_VIDEO_SOCKET_NAME="
 
   if [[ "${mode}" == "bundle" ]]; then
     assert_contains "${TMP_ROOT}/healthd.env" "LD_LIBRARY_PATH=${TMP_ROOT}/lib/app:${TMP_ROOT}/lib"

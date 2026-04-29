@@ -1,0 +1,59 @@
+{
+  "system": {
+    "runtime_mode": "auto"
+  },
+  "paths": {
+    "storage_dir": "/home/elf/videosurv/",
+    "database_path": "../data/healthd.sqlite"
+  },
+  "ipc": {
+    "health_socket": "../run/rk_health_station.sock",
+    "video_socket": "../run/rk_video.sock",
+    "analysis_socket": "../run/rk_video_analysis.sock",
+    "fall_socket": "../run/rk_fall.sock"
+  },
+  "video": {
+    "camera_id": "front_cam",
+    "device_path": "/dev/video11",
+    "pipeline_backend": "process",
+    "analysis_enabled": true,
+    "analysis_convert_backend": "gstreamer_cpu",
+    "gst_launch_bin": "gst-launch-1.0"
+  },
+  "analysis": {
+    "transport": "shared_memory",
+    "dma_heap": "/dev/dma_heap/system-uncached-dma32",
+    "rga_output_dmabuf": false,
+    "gst_dmabuf_input": false,
+    "gst_force_dmabuf_io": false
+  },
+  "fall_detection": {
+    "enabled": true,
+    "pose_model_path": "../assets/models/yolov8n-pose.rknn",
+    "stgcn_model_path": "../assets/models/stgcn_fall.rknn",
+    "lstm_model_path": "../assets/models/lstm_fall.rknn",
+    "lstm_weights_path": "../assets/models/lstm_fall_weights.json",
+    "action_model_path": "../assets/models/stgcn_fall.onnx",
+    "action_backend": "lstm_rknn",
+    "max_tracks": 5,
+    "track_high_thresh": 0.35,
+    "track_low_thresh": 0.1,
+    "new_track_thresh": 0.45,
+    "match_thresh": 0.8,
+    "lost_timeout_ms": 800,
+    "min_valid_keypoints": 8,
+    "min_box_area": 4096.0,
+    "sequence_length": 45,
+    "rknn_input_dmabuf": false,
+    "rknn_io_mem_mode": "default"
+  },
+  "debug": {
+    "healthd_event_marker_path": "",
+    "video_latency_marker_path": "",
+    "fall_latency_marker_path": "",
+    "fall_pose_timing_path": "",
+    "fall_track_trace_path": "",
+    "fall_action_debug": false,
+    "fall_lstm_trace_path": ""
+  }
+}

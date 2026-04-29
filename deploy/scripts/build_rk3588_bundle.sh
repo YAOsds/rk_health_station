@@ -70,12 +70,13 @@ cmake -S "${PROJECT_ROOT}/rk_app" \
   -DRKAPP_ENABLE_RGA_ANALYSIS_CONVERT=ON \
   -DRKAPP_ENABLE_INPROCESS_GSTREAMER=ON
 
-cmake --build "${BUILD_DIR}" --target healthd health-ui health-videod health-falld -j"${JOBS}"
+cmake --build "${BUILD_DIR}" --target healthd health-ui health-videod health-falld health-config-ui -j"${JOBS}"
 
 verify_arm64 "${BUILD_DIR}/src/healthd/healthd"
 verify_arm64 "${BUILD_DIR}/src/health_ui/health-ui"
 verify_arm64 "${BUILD_DIR}/src/health_videod/health-videod"
 verify_arm64 "${BUILD_DIR}/src/health_falld/health-falld"
+verify_arm64 "${BUILD_DIR}/src/health_config_ui/health-config-ui"
 
 rm -rf "${BUNDLE_DIR}"
 mkdir -p \
@@ -84,6 +85,7 @@ mkdir -p \
   "${BUNDLE_DIR}/lib/app" \
   "${BUNDLE_DIR}/plugins" \
   "${BUNDLE_DIR}/scripts" \
+  "${BUNDLE_DIR}/config" \
   "${BUNDLE_DIR}/logs" \
   "${BUNDLE_DIR}/run" \
   "${BUNDLE_DIR}/data" \
@@ -94,6 +96,9 @@ install -m 755 "${BUILD_DIR}/src/healthd/healthd" "${BUNDLE_DIR}/bin/healthd"
 install -m 755 "${BUILD_DIR}/src/health_ui/health-ui" "${BUNDLE_DIR}/bin/health-ui"
 install -m 755 "${BUILD_DIR}/src/health_videod/health-videod" "${BUNDLE_DIR}/bin/health-videod"
 install -m 755 "${BUILD_DIR}/src/health_falld/health-falld" "${BUNDLE_DIR}/bin/health-falld"
+install -m 755 "${BUILD_DIR}/src/health_config_ui/health-config-ui" "${BUNDLE_DIR}/bin/health-config-ui"
+install -m 644 "${PROJECT_ROOT}/deploy/config/runtime_config.json" "${BUNDLE_DIR}/config/runtime_config.json"
+install -m 755 "${PROJECT_ROOT}/deploy/bundle/config.sh" "${BUNDLE_DIR}/scripts/config.sh"
 install -m 755 "${PROJECT_ROOT}/deploy/bundle/start.sh" "${BUNDLE_DIR}/scripts/start.sh"
 install -m 755 "${PROJECT_ROOT}/deploy/bundle/start_all.sh" "${BUNDLE_DIR}/scripts/start_all.sh"
 install -m 755 "${PROJECT_ROOT}/deploy/bundle/stop.sh" "${BUNDLE_DIR}/scripts/stop.sh"
@@ -142,18 +147,8 @@ if [[ -f "${RKNN_MODEL_ZOO_ROOT}/yolo_detect/stgcn/exports/stgcn_fall.onnx" ]]; 
 fi
 
 cat > "${BUNDLE_DIR}/bundle.env" <<ENVEOF
-RK_HEALTH_STATION_SOCKET_NAME=\${RK_HEALTH_STATION_SOCKET_NAME:-\${PWD}/run/rk_health_station.sock}
-RK_VIDEO_SOCKET_NAME=\${RK_VIDEO_SOCKET_NAME:-\${PWD}/run/rk_video.sock}
-HEALTHD_DB_PATH=\${HEALTHD_DB_PATH:-\${PWD}/data/healthd.sqlite}
-RK_VIDEO_ANALYSIS_SOCKET_PATH=\${RK_VIDEO_ANALYSIS_SOCKET_PATH:-\${PWD}/run/rk_video_analysis.sock}
-RK_FALL_SOCKET_NAME=\${RK_FALL_SOCKET_NAME:-\${PWD}/run/rk_fall.sock}
-RK_FALL_POSE_MODEL_PATH=\${RK_FALL_POSE_MODEL_PATH:-\${PWD}/assets/models/yolov8n-pose.rknn}
-RK_FALL_ACTION_BACKEND=\${RK_FALL_ACTION_BACKEND:-lstm_rknn}
-RK_FALL_LSTM_MODEL_PATH=\${RK_FALL_LSTM_MODEL_PATH:-\${PWD}/assets/models/lstm_fall.rknn}
-RK_FALL_LSTM_WEIGHTS_PATH=\${RK_FALL_LSTM_WEIGHTS_PATH:-\${PWD}/assets/models/lstm_fall_weights.json}
-RK_FALL_STGCN_MODEL_PATH=\${RK_FALL_STGCN_MODEL_PATH:-\${PWD}/assets/models/stgcn_fall.rknn}
-RK_FALL_ACTION_MODEL_PATH=\${RK_FALL_ACTION_MODEL_PATH:-\${PWD}/assets/models/stgcn_fall.onnx}
-RK_VIDEO_ANALYSIS_ENABLED=\${RK_VIDEO_ANALYSIS_ENABLED:-1}
+RK_APP_CONFIG_PATH=\${RK_APP_CONFIG_PATH:-\${PWD}/config/runtime_config.json}
+RK_RUNTIME_MODE=\${RK_RUNTIME_MODE:-auto}
 ENVEOF
 
 cat <<INFO
@@ -165,6 +160,9 @@ Key paths:
   binary: ${BUNDLE_DIR}/bin/health-ui
   binary: ${BUNDLE_DIR}/bin/health-videod
   binary: ${BUNDLE_DIR}/bin/health-falld
+  binary: ${BUNDLE_DIR}/bin/health-config-ui
+  config: ${BUNDLE_DIR}/config/runtime_config.json
+  script: ${BUNDLE_DIR}/scripts/config.sh
   script: ${BUNDLE_DIR}/scripts/start.sh
   script: ${BUNDLE_DIR}/scripts/start_all.sh
   script: ${BUNDLE_DIR}/scripts/stop.sh

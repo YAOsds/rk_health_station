@@ -167,22 +167,22 @@ GstBuffer / raw frame
 
 含义：
 
-- `RK_VIDEO_PIPELINE_BACKEND=inproc_gst`
+- `video.pipeline_backend = inproc_gst`
   - 启用进程内 GStreamer `appsink` 分析分支
   - 不再依赖外部 `gst-launch-1.0 + fdsink`
-- `RK_VIDEO_ANALYSIS_CONVERT_BACKEND=rga`
+- `video.analysis_convert_backend = rga`
   - 分析分支使用 RGA 做缩放和颜色转换
-- `RK_VIDEO_ANALYSIS_TRANSPORT=dmabuf`
+- `analysis.transport = dmabuf`
   - `health-videod -> health-falld` 使用 fd descriptor transport
-- `RK_VIDEO_RGA_OUTPUT_DMABUF=1`
+- `analysis.rga_output_dmabuf = true`
   - RGA 直接把 RGB 输出写到 DMA heap fd
-- `RK_VIDEO_GST_DMABUF_INPUT=1`
+- `analysis.gst_dmabuf_input = true`
   - 只启用 `appsink` 输入侧的 DMABUF 探测与日志
   - 如果当前协商出来的 `GstBuffer` 本身就是 `memory:DMABuf`，则优先走输入 fd 路径
   - 这个开关本身不再强制改变摄像头主链格式，也不再默认强制 `v4l2src io-mode=dmabuf`
-- `RK_FALL_RKNN_INPUT_DMABUF=1`
+- `fall_detection.rknn_input_dmabuf = true`
   - `health-falld` 优先走 RKNN 输入侧 DMABUF 路径
-- `RK_VIDEO_ANALYSIS_DMA_HEAP=/dev/dma_heap/system-uncached-dma32`
+- `analysis.dma_heap = /dev/dma_heap/system-uncached-dma32`
   - 当前推荐的 DMA heap
   - 如果不设置，代码也会默认回到这个 heap
 
@@ -196,8 +196,8 @@ RK_VIDEO_GST_FORCE_DMABUF_IO=1 ./scripts/start.sh --backend-only
 
 - 强制 `v4l2src io-mode=dmabuf`
 - 同时允许 in-process GStreamer 切到实验性的 `UYVY` DMABUF 协商路径
-- 仅用于继续排查 GStreamer 协商问题
-- 不建议作为默认生产开关长期保留
+- 当前更适合用作 A/B 对比、排障和板端能力确认
+- 只有当板端驱动与插件协商稳定时，才建议写进长期配置
 
 ### 默认行为和回退
 
@@ -209,36 +209,68 @@ RK_VIDEO_GST_FORCE_DMABUF_IO=1 ./scripts/start.sh --backend-only
 
 如果只打开一部分开关，行为是分层回退的：
 
-- 没有 `RK_VIDEO_PIPELINE_BACKEND=inproc_gst`
+- `video.pipeline_backend` 不是 `inproc_gst`
   - 不会启用进程内 `appsink`
-- 没有 `RK_VIDEO_RGA_OUTPUT_DMABUF=1`
+- `analysis.rga_output_dmabuf` 没有打开
   - RGA 输出仍可能回到 `QByteArray` 再发布
-- `RK_VIDEO_GST_DMABUF_INPUT=1` 但板端没有命中 DMABUF
+- `analysis.gst_dmabuf_input = true` 但板端没有命中 DMABUF
   - 会自动回退到原始 bytes 输入路径
   - 不应丢帧
-- `RK_VIDEO_PIPELINE_BACKEND=inproc_gst` 且 `input_mode=test_file`
+- `video.pipeline_backend = inproc_gst` 且 `input_mode=test_file`
   - 会自动回退到现有外部 `gst-launch` 文件播放路径
   - 不会再因为 in-process 后端未实现 `filesrc/decodebin` 而导致 `start_test_input` 失败
 
-### 当前板端限制
+### 当前板端验证结论
 
-当前这块 RK3588 板子截至 2026-04-28 的已验证结论是：
+当前这块 RK3588 板子截至 2026-04-29 的最新实测结论是：
 
-- 默认稳定通路下，`NV12` 分析分支在 `appsink` 端会退化成 `SystemMemory`
-- 只设置 `RK_VIDEO_GST_DMABUF_INPUT=1` 时，日志会看到：
+- 默认 JSON 配置下，分析链路仍走稳定的 `gstreamer_cpu + shared_memory` 逻辑
+- 当下面这组 JSON 配置一起打开时，板端已经实测命中一条完整的 0 拷贝优先路径：
 
-```text
-video_runtime event=gst_dmabuf_input unavailable reason=not_dmabuf
+```json
+{
+  "video": {
+    "pipeline_backend": "inproc_gst",
+    "analysis_convert_backend": "rga"
+  },
+  "analysis": {
+    "transport": "dmabuf",
+    "rga_output_dmabuf": true,
+    "gst_dmabuf_input": true,
+    "gst_force_dmabuf_io": true
+  },
+  "fall_detection": {
+    "rknn_input_dmabuf": true
+  }
+}
 ```
 
-- 也就是说，当前默认推荐开关组合仍然是：
+- 对应日志会看到：
 
 ```text
-NV12/SystemMemory -> RGA -> RGB DMA fd
+video_runtime event=gst_dmabuf_input available payload_bytes=614400 stride=1280 format=UYVY
+video_runtime camera=front_cam event=preview_started mode=camera backend=inproc_gst analysis=1 analysis_backend=rga
 ```
 
-- 如果额外设置 `RK_VIDEO_GST_FORCE_DMABUF_IO=1`，则会进入实验性的 `UYVY + io-mode=dmabuf` 协商路径；是否真正命中输入侧 DMABUF，仍取决于板端驱动和插件协商结果
-- 当前不应把“输入侧 0 拷贝已稳定落地”当作既成事实来使用或宣传
+- `health-videod` marker 会看到：
+
+```json
+{"transport":"dmabuf","rga_input_dmabuf":true,"rga_output_dmabuf":true}
+```
+
+- `health-falld` marker 会看到：
+
+```json
+{"input_dmabuf_path":true,"io_mem_path":true,"output_prealloc_path":true}
+```
+
+- 也就是说，这块板子的当前高性能路径已经验证为：
+
+```text
+GStreamer DMABUF input -> RGA DMABUF output -> RKNN DMABUF input
+```
+
+- 这条链路仍依赖板端驱动、插件版本和摄像头协商结果；如果未来更换内核、插件或摄像头格式，仍建议重新做一次板端 smoke
 
 ### 板端启动示例
 
@@ -281,14 +313,18 @@ ps -ef | grep '[g]st-launch'
 grep -E 'preview_started|gst_dmabuf_input' /home/elf/rk3588_bundle/logs/health-videod.log
 ```
 
-当前板端默认推荐开关下，期望看到类似：
+默认 JSON 配置下，期望看到类似：
 
 ```text
-video_runtime event=gst_dmabuf_input unavailable reason=not_dmabuf
-video_runtime camera=front_cam event=preview_started mode=camera backend=inproc_gst analysis=1 analysis_backend=rga
+video_runtime camera=front_cam event=preview_started mode=camera analysis=1 analysis_backend=gstreamer_cpu
 ```
 
-只有在额外开启 `RK_VIDEO_GST_FORCE_DMABUF_IO=1` 并且板端协商成功时，才可能看到 `available ... format=UYVY`。
+0 拷贝 JSON 配置打开后，期望看到：
+
+```text
+video_runtime event=gst_dmabuf_input available payload_bytes=614400 stride=1280 format=UYVY
+video_runtime camera=front_cam event=preview_started mode=camera backend=inproc_gst analysis=1 analysis_backend=rga
+```
 
 确认分析 descriptor 走 DMABUF：
 
@@ -296,14 +332,14 @@ video_runtime camera=front_cam event=preview_started mode=camera backend=inproc_
 grep 'analysis_descriptor_published' /tmp/rk_video_dmabuf_input.jsonl | head
 ```
 
-当前默认稳定收益点仍然是输出侧 DMABUF，因此期望字段至少包含：
+0 拷贝 JSON 配置打开后，期望字段至少包含：
 
 ```json
-{"transport":"dmabuf","rga_output_dmabuf":true}
+{"transport":"dmabuf","rga_input_dmabuf":true,"rga_output_dmabuf":true}
 ```
 
-如果额外开启 `RK_VIDEO_GST_FORCE_DMABUF_IO=1`，并且板端实际命中了 `UYVY + io-mode=dmabuf` 输入路径，则 marker 中还会进一步出现：
+同时 `health-falld` 侧应看到：
 
 ```json
-{"rga_input_dmabuf":true,"rga_output_dmabuf":true}
+{"input_dmabuf_path":true,"io_mem_path":true,"output_prealloc_path":true}
 ```

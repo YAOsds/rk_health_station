@@ -4,6 +4,23 @@
 #include <QFileInfo>
 
 namespace {
+QString legacyDefaultSocketName(const QString &path) {
+    const QString cleanedPath = QDir::cleanPath(path);
+    if (cleanedPath == QStringLiteral("run/rk_health_station.sock")) {
+        return QStringLiteral("rk_health_station.sock");
+    }
+    if (cleanedPath == QStringLiteral("run/rk_video.sock")) {
+        return QStringLiteral("rk_video.sock");
+    }
+    if (cleanedPath == QStringLiteral("run/rk_video_analysis.sock")) {
+        return QStringLiteral("rk_video_analysis.sock");
+    }
+    if (cleanedPath == QStringLiteral("run/rk_fall.sock")) {
+        return QStringLiteral("rk_fall.sock");
+    }
+    return cleanedPath;
+}
+
 QString normalizeOptionalPath(const QString &baseDir, const QString &path) {
     if (path.isEmpty()) {
         return path;
@@ -27,8 +44,8 @@ QString normalizeSocketPath(const QString &baseDir, const QString &path) {
     }
 
     if (baseDir.isEmpty()) {
-        // Compatibility mode: without a config file, preserve legacy env overrides verbatim.
-        return QDir::cleanPath(path);
+        // Compatibility mode: preserve env overrides, but keep built-in defaults on legacy short names.
+        return legacyDefaultSocketName(path);
     }
 
     return QDir::cleanPath(QDir(baseDir).absoluteFilePath(path));

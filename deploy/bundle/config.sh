@@ -8,8 +8,20 @@ LIB_DIR="${BUNDLE_ROOT}/lib"
 APP_LIB_DIR="${LIB_DIR}/app"
 PLUGIN_DIR="${BUNDLE_ROOT}/plugins"
 CONFIG_BIN="${BIN_DIR}/health-config-ui"
-RUNTIME_MODE=${RK_RUNTIME_MODE:-auto}
-CONFIG_PATH="${RK_APP_CONFIG_PATH:-${BUNDLE_ROOT}/config/runtime_config.json}"
+
+abspath_path() {
+  local path=$1
+
+  readlink -m -- "${path}"
+}
+
+read_runtime_mode_from_config() {
+  local config_path=$1
+  tr -d '\r\n' < "${config_path}" | sed -n 's/.*"runtime_mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+CONFIG_PATH=$(abspath_path "${RK_APP_CONFIG_PATH:-${BUNDLE_ROOT}/config/runtime_config.json}")
+RUNTIME_MODE=${RK_RUNTIME_MODE:-}
 
 if [[ ! -f "${CONFIG_PATH}" ]]; then
   echo "missing runtime config: ${CONFIG_PATH}" >&2
@@ -19,6 +31,11 @@ if [[ ! -x "${CONFIG_BIN}" ]]; then
   echo "missing config ui binary: ${CONFIG_BIN}" >&2
   exit 1
 fi
+
+if [[ -z "${RUNTIME_MODE}" ]]; then
+  RUNTIME_MODE=$(read_runtime_mode_from_config "${CONFIG_PATH}")
+fi
+RUNTIME_MODE=${RUNTIME_MODE:-auto}
 
 export RK_APP_CONFIG_PATH="${CONFIG_PATH}"
 

@@ -23,8 +23,20 @@ UI_LOG="${LOG_DIR}/health-ui.log"
 VIDEOD_LOG="${LOG_DIR}/health-videod.log"
 FALLD_LOG="${LOG_DIR}/health-falld.log"
 BACKEND_ONLY=0
-RUNTIME_MODE=${RK_RUNTIME_MODE:-auto}
-CONFIG_PATH="${RK_APP_CONFIG_PATH:-${BUNDLE_ROOT}/config/runtime_config.json}"
+
+abspath_path() {
+  local path=$1
+
+  readlink -m -- "${path}"
+}
+
+read_runtime_mode_from_config() {
+  local config_path=$1
+  tr -d '\r\n' < "${config_path}" | sed -n 's/.*"runtime_mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+CONFIG_PATH=$(abspath_path "${RK_APP_CONFIG_PATH:-${BUNDLE_ROOT}/config/runtime_config.json}")
+RUNTIME_MODE=${RK_RUNTIME_MODE:-}
 
 if [[ "${1:-}" == "--backend-only" ]]; then
   BACKEND_ONLY=1
@@ -36,6 +48,11 @@ if [[ ! -f "${CONFIG_PATH}" ]]; then
   echo "missing runtime config: ${CONFIG_PATH}" >&2
   exit 1
 fi
+
+if [[ -z "${RUNTIME_MODE}" ]]; then
+  RUNTIME_MODE=$(read_runtime_mode_from_config "${CONFIG_PATH}")
+fi
+RUNTIME_MODE=${RUNTIME_MODE:-auto}
 
 export RK_APP_CONFIG_PATH="${CONFIG_PATH}"
 

@@ -11,6 +11,7 @@ class AppRuntimeConfigTest : public QObject {
 
 private slots:
     void loadsBuiltInDefaults();
+    void preservesLegacySocketDefaultsWithoutConfigFile();
     void loadsJsonValuesFromFile();
     void environmentOverridesJsonValues();
     void preservesRelativeSocketPathFromEnvironmentOverride();
@@ -24,6 +25,15 @@ void AppRuntimeConfigTest::loadsBuiltInDefaults() {
     QCOMPARE(result.config.video.cameraId, QStringLiteral("front_cam"));
     QCOMPARE(result.config.video.devicePath, QStringLiteral("/dev/video11"));
     QCOMPARE(result.config.analysis.transport, QStringLiteral("shared_memory"));
+}
+
+void AppRuntimeConfigTest::preservesLegacySocketDefaultsWithoutConfigFile() {
+    const auto result = loadAppRuntimeConfig(QString());
+    QVERIFY(result.ok);
+    QCOMPARE(result.config.ipc.healthSocketPath, QStringLiteral("rk_health_station.sock"));
+    QCOMPARE(result.config.ipc.videoSocketPath, QStringLiteral("rk_video.sock"));
+    QCOMPARE(result.config.ipc.analysisSocketPath, QStringLiteral("rk_video_analysis.sock"));
+    QCOMPARE(result.config.ipc.fallSocketPath, QStringLiteral("rk_fall.sock"));
 }
 
 void AppRuntimeConfigTest::loadsJsonValuesFromFile() {

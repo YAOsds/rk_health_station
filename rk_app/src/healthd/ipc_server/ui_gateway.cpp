@@ -5,6 +5,8 @@
 #include "runtime_config/app_runtime_config_loader.h"
 #include "storage/database.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -75,6 +77,10 @@ UiGateway::~UiGateway() {
 
 bool UiGateway::start() {
     stop();
+    const QFileInfo socketInfo(socketName_);
+    if (socketName_.contains('/') && !socketInfo.absolutePath().isEmpty()) {
+        QDir().mkpath(socketInfo.absolutePath());
+    }
     QLocalServer::removeServer(socketName_);
     server_->setSocketOptions(QLocalServer::UserAccessOption);
     const bool ok = server_->listen(socketName_);

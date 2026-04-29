@@ -14,6 +14,7 @@ class UiGatewayTest : public QObject {
 
 private slots:
     void requestDeviceList();
+    void startsWithAbsoluteSocketPathInMissingParentDirectory();
     void requestDashboardSnapshotIncludesHostWifi();
     void approvePendingDeviceViaGateway();
     void requestAlertsSnapshot();
@@ -67,6 +68,18 @@ void UiGatewayTest::requestDeviceList() {
     QCOMPARE(devices.size(), 1);
     QCOMPARE(devices.at(0).toObject().value(QStringLiteral("device_id")).toString(),
         QStringLiteral("watch_ipc_001"));
+}
+
+void UiGatewayTest::startsWithAbsoluteSocketPathInMissingParentDirectory() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString socketDir = tempDir.filePath(QStringLiteral("nested/runtime"));
+    const QString socketPath = socketDir + QStringLiteral("/rk_health_station.sock");
+
+    DeviceManager deviceManager;
+    UiGateway gateway(socketPath, &deviceManager);
+    QVERIFY(gateway.start());
+    QVERIFY(QFileInfo::exists(socketPath));
 }
 
 void UiGatewayTest::requestDashboardSnapshotIncludesHostWifi() {

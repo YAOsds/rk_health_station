@@ -13,6 +13,7 @@ private slots:
     void loadsBuiltInDefaults();
     void loadsJsonValuesFromFile();
     void environmentOverridesJsonValues();
+    void preservesRelativeSocketPathFromEnvironmentOverride();
     void resolvesRelativePathsAgainstConfigDirectory();
     void rejectsInvalidEnumValues();
 };
@@ -57,6 +58,17 @@ void AppRuntimeConfigTest::environmentOverridesJsonValues() {
     QCOMPARE(result.config.analysis.transport, QStringLiteral("dmabuf"));
     QCOMPARE(result.origins.value(QStringLiteral("analysis.transport")), QStringLiteral("environment"));
     qunsetenv("RK_VIDEO_ANALYSIS_TRANSPORT");
+}
+
+void AppRuntimeConfigTest::preservesRelativeSocketPathFromEnvironmentOverride() {
+    qputenv("RK_VIDEO_SOCKET_NAME", QByteArray("./run/custom/rk_video.sock"));
+
+    const auto result = loadAppRuntimeConfig(QString());
+    QVERIFY(result.ok);
+    QCOMPARE(result.config.ipc.videoSocketPath, QStringLiteral("run/custom/rk_video.sock"));
+    QCOMPARE(result.origins.value(QStringLiteral("ipc.video_socket")), QStringLiteral("environment"));
+
+    qunsetenv("RK_VIDEO_SOCKET_NAME");
 }
 
 void AppRuntimeConfigTest::resolvesRelativePathsAgainstConfigDirectory() {

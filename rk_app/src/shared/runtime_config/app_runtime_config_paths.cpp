@@ -27,8 +27,8 @@ QString normalizeSocketPath(const QString &baseDir, const QString &path) {
     }
 
     if (baseDir.isEmpty()) {
-        // Compatibility mode: without a config file, preserve the legacy short socket names.
-        return info.fileName();
+        // Compatibility mode: without a config file, preserve legacy env overrides verbatim.
+        return QDir::cleanPath(path);
     }
 
     return QDir::cleanPath(QDir(baseDir).absoluteFilePath(path));

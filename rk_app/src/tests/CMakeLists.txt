@@ -646,6 +646,7 @@ add_executable(video_runtime_config_integration_test
     ../health_videod/analysis/gstreamer_analysis_output_backend.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp
     ../health_videod/analysis/rga_frame_converter.cpp
+    ../health_videod/app/video_daemon_app.cpp
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
     ../health_videod/debug/video_runtime_log_stats.cpp

@@ -1,3 +1,4 @@
+#include "app/video_daemon_app.h"
 #include "core/video_service.h"
 #include "ipc/video_gateway.h"
 #include "runtime_config/app_runtime_config_loader.h"
@@ -13,6 +14,7 @@ class VideoRuntimeConfigIntegrationTest : public QObject {
 private slots:
     void initializesDefaultChannelFromJsonConfig();
     void resolvesVideoSocketPathFromJsonConfig();
+    void rejectsInvalidDefaultRuntimeConfig();
 };
 
 void VideoRuntimeConfigIntegrationTest::initializesDefaultChannelFromJsonConfig() {
@@ -58,6 +60,28 @@ void VideoRuntimeConfigIntegrationTest::resolvesVideoSocketPathFromJsonConfig() 
     VideoGateway gateway(loaded.config.ipc.videoSocketPath, &service);
     QVERIFY(gateway.start());
     QVERIFY(QFile::exists(loaded.config.ipc.videoSocketPath));
+}
+
+void VideoRuntimeConfigIntegrationTest::rejectsInvalidDefaultRuntimeConfig() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    QFile file(dir.filePath(QStringLiteral("runtime_config.json")));
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    file.write(R"({
+        "video": {
+            "pipeline_backend": "broken"
+        }
+    })");
+    file.close();
+
+    qputenv("RK_APP_CONFIG_PATH", file.fileName().toUtf8());
+
+    VideoDaemonApp daemon;
+    QVERIFY(!daemon.hasValidRuntimeConfig());
+    QVERIFY(!daemon.start());
+
+    qunsetenv("RK_APP_CONFIG_PATH");
 }
 
 QTEST_MAIN(VideoRuntimeConfigIntegrationTest)

@@ -1,4 +1,5 @@
 #include "app/video_daemon_app.h"
+#include "runtime_config/app_runtime_config_loader.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -50,6 +51,14 @@ int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
     qInfo() << "health-videod lifecycle: process start" << app.arguments();
 
+    const LoadedAppRuntimeConfig loaded = loadAppRuntimeConfig(QString());
+    if (!loaded.ok) {
+        for (const QString &error : loaded.errors) {
+            qCritical().noquote() << "runtime_config error:" << error;
+        }
+        return 1;
+    }
+
     if (!installSignalHandlers()) {
         qCritical() << "health-videod lifecycle: failed to install signal handlers";
         return 1;
@@ -65,7 +74,7 @@ int main(int argc, char *argv[]) {
         signalNotifier.setEnabled(true);
     });
 
-    VideoDaemonApp daemon;
+    VideoDaemonApp daemon(loaded.config);
     const bool started = daemon.start();
     qInfo() << "health-videod lifecycle: daemon start result" << started;
     if (!started) {

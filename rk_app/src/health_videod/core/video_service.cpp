@@ -4,6 +4,7 @@
 #include "analysis/gstreamer_analysis_output_backend.h"
 #include "pipeline/gstreamer_video_pipeline_backend.h"
 #include "pipeline/video_pipeline_backend.h"
+#include "runtime_config/app_runtime_config_loader.h"
 
 #include <QDateTime>
 #include <QDebug>
@@ -11,16 +12,18 @@
 #include <QFileInfo>
 
 namespace {
-const char kDefaultCameraId[] = "front_cam";
-const char kDefaultDevicePath[] = "/dev/video11";
-const char kDefaultStorageDir[] = "/home/elf/videosurv/";
-const char kAnalysisEnabledEnvVar[] = "RK_VIDEO_ANALYSIS_ENABLED";
-const char kVideoLatencyMarkerEnvVar[] = "RK_VIDEO_LATENCY_MARKER_PATH";
+const char kDefaultDisplayName[] = "Front Camera";
 }
 
 VideoService::VideoService(
     VideoPipelineBackend *pipelineBackend, AnalysisOutputBackend *analysisBackend, QObject *parent)
+    : VideoService(loadAppRuntimeConfig(QString()).config, pipelineBackend, analysisBackend, parent) {
+}
+
+VideoService::VideoService(const AppRuntimeConfig &runtimeConfig,
+    VideoPipelineBackend *pipelineBackend, AnalysisOutputBackend *analysisBackend, QObject *parent)
     : QObject(parent)
+    , runtimeConfig_(runtimeConfig)
     , pipelineBackend_(pipelineBackend ? pipelineBackend : new GstreamerVideoPipelineBackend())
     , analysisBackend_(analysisBackend ? analysisBackend : new GstreamerAnalysisOutputBackend())
     , ownsPipelineBackend_(!pipelineBackend)
@@ -245,7 +248,7 @@ VideoCommandResult VideoService::startTestInput(const QString &cameraId, const Q
             QStringLiteral("test_input_start_failed"));
     }
 
-    LatencyMarkerWriter marker(qEnvironmentVariable(kVideoLatencyMarkerEnvVar));
+    LatencyMarkerWriter marker(runtimeConfig_.debug.videoLatencyMarkerPath);
     marker.writeEvent(QStringLiteral("playback_started"), QDateTime::currentMSecsSinceEpoch(),
         QJsonObject{
             {QStringLiteral("camera_id"), cameraId},
@@ -295,11 +298,17 @@ VideoCommandResult VideoService::stopTestInput(const QString &cameraId) {
 
 void VideoService::initializeDefaultChannels() {
     VideoChannelStatus channel;
-    channel.cameraId = QString::fromUtf8(kDefaultCameraId);
-    channel.displayName = QStringLiteral("Front Camera");
-    channel.devicePath = QString::fromUtf8(kDefaultDevicePath);
+    channel.cameraId = runtimeConfig_.video.cameraId.isEmpty()
+        ? QStringLiteral("front_cam")
+        : runtimeConfig_.video.cameraId;
+    channel.displayName = QString::fromUtf8(kDefaultDisplayName);
+    channel.devicePath = runtimeConfig_.video.devicePath.isEmpty()
+        ? QStringLiteral("/dev/video11")
+        : runtimeConfig_.video.devicePath;
     channel.cameraState = VideoCameraState::Idle;
-    channel.storageDir = QString::fromUtf8(kDefaultStorageDir);
+    channel.storageDir = runtimeConfig_.paths.storageDir.isEmpty()
+        ? QStringLiteral("/home/elf/videosurv/")
+        : runtimeConfig_.paths.storageDir;
     channel.recording = false;
     channel.previewProfile.width = 640;
     channel.previewProfile.height = 480;
@@ -418,7 +427,7 @@ void VideoService::resetTestModeState(VideoChannelStatus *channel) const {
 
 bool VideoService::analysisEnabledForCamera(const QString &cameraId) const {
     Q_UNUSED(cameraId);
-    return qEnvironmentVariableIntValue(kAnalysisEnabledEnvVar) == 1;
+    return runtimeConfig_.video.analysisEnabled;
 }
 
 bool VideoService::syncAnalysisOutput(const QString &cameraId, QString *errorCode) {

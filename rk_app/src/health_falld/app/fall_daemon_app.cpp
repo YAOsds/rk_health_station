@@ -13,8 +13,6 @@
 #include <memory>
 
 namespace {
-const char kFallLatencyMarkerEnvVar[] = "RK_FALL_LATENCY_MARKER_PATH";
-
 int validKeypointCount(const PosePerson &person) {
     int count = 0;
     for (const PoseKeypoint &keypoint : person.keypoints) {
@@ -47,22 +45,29 @@ QPointF overlayAnchorForPose(const PosePerson &person) {
 }
 
 FallDaemonApp::FallDaemonApp(QObject *parent)
-    : FallDaemonApp(std::make_unique<RknnPoseEstimator>(), parent) {
+    : FallDaemonApp(loadFallRuntimeConfig(), parent) {
 }
 
 FallDaemonApp::FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObject *parent)
+    : FallDaemonApp(loadFallRuntimeConfig(), std::move(poseEstimator), parent) {
+}
+
+FallDaemonApp::FallDaemonApp(const FallRuntimeConfig &config, QObject *parent)
+    : FallDaemonApp(config, std::make_unique<RknnPoseEstimator>(config), parent) {
+}
+
+FallDaemonApp::FallDaemonApp(
+    const FallRuntimeConfig &config, std::unique_ptr<PoseEstimator> poseEstimator, QObject *parent)
     : QObject(parent)
-    , config_(loadFallRuntimeConfig())
+    , config_(config)
     , poseEstimator_(std::move(poseEstimator))
     , actionClassifier_(createActionClassifier(config_))
     , detectorService_(actionClassifier_.get())
     , tracker_(config_)
     , trackIconRegistry_(config_.maxTracks)
     , trackTraceLogger_(config_.trackTracePath)
-    , latencyMarkerWriter_(std::make_unique<LatencyMarkerWriter>(
-          qEnvironmentVariable(kFallLatencyMarkerEnvVar)))
-    , ingestClient_(new AnalysisStreamClient(
-          config_.analysisSocketPath, config_.analysisSharedMemoryName, this))
+    , latencyMarkerWriter_(std::make_unique<LatencyMarkerWriter>(config_.latencyMarkerPath))
+    , ingestClient_(new AnalysisStreamClient(config_, this))
     , gateway_(new FallGateway(FallRuntimeStatus(), this)) {
     const auto syncErrorLog = [this]() {
         if (runtimeStatus_.lastError == lastLoggedError_) {

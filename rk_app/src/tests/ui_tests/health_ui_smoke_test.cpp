@@ -1,6 +1,8 @@
 #include "device/device_manager.h"
 #include "ipc_client/ui_ipc_client.h"
 #include "ipc_server/ui_gateway.h"
+#include "runtime_config/app_runtime_config.h"
+
 
 #include <QApplication>
 #include <QTemporaryDir>
@@ -18,7 +20,8 @@ void HealthUiSmokeTest::connectsToBackend() {
 
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    qputenv("RK_HEALTH_STATION_SOCKET_NAME", tempDir.filePath(QStringLiteral("rk_health_station.sock")).toUtf8());
+    AppRuntimeConfig config = buildDefaultAppRuntimeConfig();
+    config.ipc.healthSocketPath = tempDir.filePath(QStringLiteral("rk_health_station.sock"));
 
     DeviceManager deviceManager;
     DeviceInfo info;
@@ -27,13 +30,12 @@ void HealthUiSmokeTest::connectsToBackend() {
     info.status = DeviceLifecycleState::Active;
     QVERIFY(deviceManager.updateMetadata(info));
 
-    UiGateway gateway(&deviceManager);
+    UiGateway gateway(config.ipc.healthSocketPath, &deviceManager);
     QVERIFY(gateway.start());
 
-    UiIpcClient client;
+    UiIpcClient client(config.ipc.healthSocketPath);
     QVERIFY(client.connectToBackend());
     QVERIFY(client.isConnected());
-    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 
 QTEST_MAIN(HealthUiSmokeTest)

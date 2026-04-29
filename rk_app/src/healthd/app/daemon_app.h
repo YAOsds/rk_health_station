@@ -7,6 +7,7 @@
 #include "network/tcp_acceptor.h"
 #include "storage/database.h"
 #include "telemetry/telemetry_service.h"
+#include "runtime_config/app_runtime_config.h"
 
 #include <QObject>
 #include <QJsonValue>
@@ -18,6 +19,7 @@ class DaemonApp : public QObject {
     Q_OBJECT
 
 public:
+    explicit DaemonApp(const AppRuntimeConfig &config, QObject *parent = nullptr);
     explicit DaemonApp(QObject *parent = nullptr);
     bool start();
 
@@ -38,6 +40,7 @@ private:
     bool isMarkerWritingEnabled() const;
     void writeTelemetryMarker(const DeviceEnvelope &envelope);
 
+    AppRuntimeConfig config_;
     TcpAcceptor acceptor_;
     Database database_;
     AuthManager authManager_;

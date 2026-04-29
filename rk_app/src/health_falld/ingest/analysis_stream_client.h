@@ -3,6 +3,7 @@
 #include "ingest/dmabuf_frame_reader.h"
 #include "ingest/shared_memory_frame_reader.h"
 #include "models/fall_models.h"
+#include "runtime/runtime_config.h"
 
 #include <QObject>
 
@@ -13,6 +14,7 @@ class AnalysisStreamClient : public QObject {
     Q_OBJECT
 
 public:
+    explicit AnalysisStreamClient(const FallRuntimeConfig &config, QObject *parent = nullptr);
     explicit AnalysisStreamClient(const QString &socketName,
         const QString &sharedMemoryNameOverride = QString(), QObject *parent = nullptr);
 
@@ -38,5 +40,7 @@ private:
     QByteArray readBuffer_;
     SharedMemoryFrameReader reader_;
     DmaBufFrameReader dmaBufReader_;
+    QString analysisTransport_;
+    QString latencyMarkerPath_;
     bool running_ = false;
 };

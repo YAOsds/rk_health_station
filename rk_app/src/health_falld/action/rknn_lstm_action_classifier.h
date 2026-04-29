@@ -2,6 +2,7 @@
 
 #include "action/action_classifier.h"
 #include "action/rknn_action_model_runner.h"
+#include "runtime/runtime_config.h"
 
 #include <memory>
 
@@ -19,6 +20,8 @@ struct CpuLstmRuntime {
 
 class RknnLstmActionClassifier : public ActionClassifier {
 public:
+    RknnLstmActionClassifier();
+    explicit RknnLstmActionClassifier(const FallRuntimeConfig &config);
     ~RknnLstmActionClassifier() override;
 
     bool loadModel(const QString &path, QString *error) override;
@@ -27,6 +30,8 @@ public:
 private:
     QVector<float> inferWithCpu(const QVector<float> &input, QString *error) const;
 
+    QString weightsPathOverride_;
+    QString tracePath_;
     RknnActionModelRunner runner_;
     std::unique_ptr<CpuLstmRuntime> cpuRuntime_;
 };

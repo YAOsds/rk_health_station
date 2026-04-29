@@ -172,6 +172,10 @@ void releaseRuntime(RknnActionRuntime *runtime) {
 }
 #endif
 
+RknnActionModelRunner::RknnActionModelRunner(bool actionDebug)
+    : actionDebug_(actionDebug) {
+}
+
 RknnActionModelRunner::~RknnActionModelRunner() {
 #ifdef RKAPP_ENABLE_REAL_RKNN_ACTION
     releaseRuntime(static_cast<RknnActionRuntime *>(runtime_));
@@ -251,7 +255,7 @@ bool RknnActionModelRunner::loadModel(const QString &path, QString *error) {
         }
     }
 
-    if (qEnvironmentVariableIsSet("RK_FALL_ACTION_DEBUG")) {
+    if (actionDebug_) {
         qInfo().noquote()
             << QStringLiteral("loaded action model path=%1 inputs=%2 outputs=%3")
                    .arg(path)

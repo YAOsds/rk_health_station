@@ -27,6 +27,9 @@ class UiGateway : public QObject {
 public:
     static QString socketName();
 
+    explicit UiGateway(const QString &socketName, DeviceManager *deviceManager,
+        Database *database = nullptr, HostWifiStatusProvider *hostWifiStatusProvider = nullptr,
+        QObject *parent = nullptr);
     explicit UiGateway(DeviceManager *deviceManager, Database *database = nullptr,
         HostWifiStatusProvider *hostWifiStatusProvider = nullptr, QObject *parent = nullptr);
     ~UiGateway() override;
@@ -62,6 +65,7 @@ private:
     DeviceManager *deviceManager_ = nullptr;
     Database *database_ = nullptr;
     HostWifiStatusProvider *hostWifiStatusProvider_ = nullptr;
+    QString socketName_;
     QLocalServer *server_ = nullptr;
     QHash<QLocalSocket *, QByteArray> readBuffers_;
     mutable AlertEngine alertEngine_;

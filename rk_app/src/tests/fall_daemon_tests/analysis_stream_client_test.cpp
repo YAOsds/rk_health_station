@@ -2,6 +2,7 @@
 #include "ingest/analysis_stream_client.h"
 #include "protocol/analysis_frame_descriptor_protocol.h"
 #include "protocol/unix_fd_passing.h"
+#include "runtime/runtime_config.h"
 
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -308,7 +309,10 @@ void AnalysisStreamClientTest::dropsOversizedDescriptorBuffer() {
 
 void AnalysisStreamClientTest::decodesDmaBufFrameFromSideChannel() {
     const QString socketName = QStringLiteral("/tmp/rk_video_analysis_dmabuf_test.sock");
-    qputenv("RK_VIDEO_ANALYSIS_TRANSPORT", "dmabuf");
+    FallRuntimeConfig config;
+    config.socketName = QStringLiteral("unused");
+    config.analysisSocketPath = socketName;
+    config.analysisTransport = QStringLiteral("dmabuf");
     QLocalServer::removeServer(socketName);
     QLocalServer::removeServer(socketName + QStringLiteral(".fd"));
 
@@ -327,7 +331,7 @@ void AnalysisStreamClientTest::decodesDmaBufFrameFromSideChannel() {
     memset(mapped, 0x24, payloadBytes);
     ::munmap(mapped, payloadBytes);
 
-    AnalysisStreamClient client(socketName);
+    AnalysisStreamClient client(config);
     QSignalSpy spy(&client, SIGNAL(frameReceived(AnalysisFramePacket)));
     client.start();
 
@@ -369,7 +373,6 @@ void AnalysisStreamClientTest::decodesDmaBufFrameFromSideChannel() {
     ::close(fdClient);
     ::close(fdServer);
     removeUnixStreamSocket(socketName + QStringLiteral(".fd"));
-    qunsetenv("RK_VIDEO_ANALYSIS_TRANSPORT");
 }
 
 QTEST_MAIN(AnalysisStreamClientTest)

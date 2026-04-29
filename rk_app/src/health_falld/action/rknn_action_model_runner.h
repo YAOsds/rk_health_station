@@ -5,12 +5,14 @@
 
 class RknnActionModelRunner {
 public:
+    explicit RknnActionModelRunner(bool actionDebug = false);
     ~RknnActionModelRunner();
 
     bool loadModel(const QString &path, QString *error);
     QVector<float> infer(const QVector<float> &input, QString *error);
 
 private:
+    bool actionDebug_ = false;
     QString modelPath_;
     void *runtime_ = nullptr;
 };

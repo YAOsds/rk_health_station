@@ -1,6 +1,7 @@
 #include "action/rknn_lstm_action_classifier.h"
 
 #include "action/stgcn_preprocessor.h"
+#include "runtime/runtime_config.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -19,9 +20,8 @@ constexpr int kExpectedFrames = 45;
 constexpr int kExpectedInputSize = 51;
 constexpr int kExpectedClasses = 3;
 
-void appendLstmTrace(const QVector<float> &input, const QVector<float> &logits,
+void appendLstmTrace(const QString &tracePath, const QVector<float> &input, const QVector<float> &logits,
     const ActionClassification &classification) {
-    const QString tracePath = qEnvironmentVariable("RK_FALL_LSTM_TRACE_PATH");
     if (tracePath.isEmpty()) {
         return;
     }
@@ -51,8 +51,7 @@ void appendLstmTrace(const QVector<float> &input, const QVector<float> &logits,
     file.write("\n");
 }
 
-QString cpuWeightsPathForModel(const QString &modelPath) {
-    const QString overridePath = qEnvironmentVariable("RK_FALL_LSTM_WEIGHTS_PATH");
+QString cpuWeightsPathForModel(const QString &modelPath, const QString &overridePath) {
     if (!overridePath.isEmpty()) {
         return overridePath;
     }
@@ -149,13 +148,23 @@ double sigmoid(double value) {
 }
 }
 
+RknnLstmActionClassifier::RknnLstmActionClassifier()
+    : RknnLstmActionClassifier(FallRuntimeConfig()) {
+}
+
+RknnLstmActionClassifier::RknnLstmActionClassifier(const FallRuntimeConfig &config)
+    : weightsPathOverride_(config.lstmWeightsPath)
+    , tracePath_(config.lstmTracePath)
+    , runner_(config.actionDebug) {
+}
+
 RknnLstmActionClassifier::~RknnLstmActionClassifier() = default;
 
 bool RknnLstmActionClassifier::loadModel(const QString &path, QString *error) {
     cpuRuntime_.reset();
 
-    const QString weightsPath = cpuWeightsPathForModel(path);
-    const bool weightsOverride = qEnvironmentVariableIsSet("RK_FALL_LSTM_WEIGHTS_PATH");
+    const QString weightsPath = cpuWeightsPathForModel(path, weightsPathOverride_);
+    const bool weightsOverride = !weightsPathOverride_.isEmpty();
     if (QFileInfo::exists(weightsPath) || weightsOverride) {
         if (!loadCpuRuntime(weightsPath, &cpuRuntime_, error)) {
             return false;
@@ -294,6 +303,6 @@ ActionClassification RknnLstmActionClassifier::classify(
     static const char *kLabels[] = {"stand", "fall", "lie"};
     classification.label = QString::fromUtf8(kLabels[bestIndex]);
     classification.confidence = probabilities[bestIndex];
-    appendLstmTrace(flattened, logits, classification);
+    appendLstmTrace(tracePath_, flattened, logits, classification);
     return classification;
 }

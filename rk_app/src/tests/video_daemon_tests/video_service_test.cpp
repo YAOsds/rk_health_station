@@ -216,12 +216,13 @@ void VideoServiceTest::startsTestInputAndDisablesCameraOnlyOperations() {
 
 void VideoServiceTest::writesPlaybackStartMarkerWhenTestInputStarts() {
     FakeVideoPipelineBackend backend;
-    VideoService service(&backend);
 
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    qputenv("RK_VIDEO_LATENCY_MARKER_PATH",
-        tempDir.filePath(QStringLiteral("video-latency.jsonl")).toUtf8());
+
+    AppRuntimeConfig config = buildDefaultAppRuntimeConfig();
+    config.debug.videoLatencyMarkerPath = tempDir.filePath(QStringLiteral("video-latency.jsonl"));
+    VideoService service(config, &backend);
 
     const QString path = QDir::temp().filePath(QStringLiteral("latency-demo.mp4"));
     QFile file(path);
@@ -235,7 +236,6 @@ void VideoServiceTest::writesPlaybackStartMarkerWhenTestInputStarts() {
     const QByteArray content = marker.readAll();
     QVERIFY(content.contains("playback_started"));
 
-    qunsetenv("RK_VIDEO_LATENCY_MARKER_PATH");
 }
 
 void VideoServiceTest::keepsTestModeAfterPlaybackFinished() {

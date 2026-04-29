@@ -1,18 +1,16 @@
 #include "ipc_client/fall_ipc_client.h"
 
 #include "protocol/fall_ipc.h"
+#include "runtime_config/app_runtime_config_loader.h"
 
 #include <QJsonDocument>
 #include <QLocalSocket>
 
-namespace {
-const char kSocketName[] = "rk_fall.sock";
-const char kSocketEnvVar[] = "RK_FALL_SOCKET_NAME";
-}
-
 FallIpcClient::FallIpcClient(const QString &socketName, QObject *parent)
     : AbstractFallClient(parent)
-    , socketName_(socketName)
+    , socketName_(socketName.isEmpty()
+            ? loadAppRuntimeConfig(QString()).config.ipc.fallSocketPath
+            : socketName)
     , socket_(new QLocalSocket(this)) {
     qRegisterMetaType<FallClassificationResult>("FallClassificationResult");
     qRegisterMetaType<FallClassificationBatch>("FallClassificationBatch");
@@ -30,13 +28,8 @@ bool FallIpcClient::connectToBackend() {
         return true;
     }
 
-    const QString envSocketName = qEnvironmentVariable(kSocketEnvVar);
-    const QString resolvedSocketName = !socketName_.isEmpty()
-            ? socketName_
-            : (!envSocketName.isEmpty() ? envSocketName : QString::fromUtf8(kSocketName));
-
     socket_->abort();
-    socket_->connectToServer(resolvedSocketName);
+    socket_->connectToServer(socketName_);
     if (!socket_->waitForConnected(2000)) {
         emit errorOccurred(socket_->errorString());
         return false;

@@ -1,6 +1,7 @@
 #include "app/daemon_app.h"
 
 #include "network/device_session.h"
+#include "runtime_config/app_runtime_config_loader.h"
 
 #include <QDebug>
 #include <QDateTime>
@@ -13,9 +14,7 @@
 
 namespace {
 constexpr quint16 kHealthdPort = 19001;
-const char kDatabaseEnvVar[] = "HEALTHD_DB_PATH";
 const char kDefaultDatabasePath[] = "/tmp/healthd-task4.sqlite";
-const char kMarkerEnvVar[] = "HEALTHD_EVENT_MARKER_PATH";
 const char kDefaultMarkerPath[] = "/tmp/healthd-task3-marker.jsonl";
 const char kMarkerEnablePath[] = "/tmp/healthd-task3-marker.enable";
 
@@ -32,14 +31,15 @@ QString helloDecisionToString(AuthManager::HelloDecision decision) {
 }
 }
 
-DaemonApp::DaemonApp(QObject *parent)
+DaemonApp::DaemonApp(const AppRuntimeConfig &config, QObject *parent)
     : QObject(parent)
+    , config_(config)
     , deviceManager_(&database_)
     , hostWifiStatusProvider_(this)
-    , uiGateway_(&deviceManager_, &database_, &hostWifiStatusProvider_, this)
+    , uiGateway_(config.ipc.healthSocketPath, &deviceManager_, &database_, &hostWifiStatusProvider_, this)
     , telemetryService_(&deviceManager_, &database_)
-    , databasePath_(qEnvironmentVariable(kDatabaseEnvVar))
-    , markerPath_(qEnvironmentVariable(kMarkerEnvVar)) {
+    , databasePath_(config.paths.databasePath)
+    , markerPath_(config.debug.healthdEventMarkerPath) {
     connect(&acceptor_, &TcpAcceptor::envelopeReceived,
         this, &DaemonApp::onEnvelopeReceived);
 
@@ -57,10 +57,14 @@ DaemonApp::DaemonApp(QObject *parent)
 
     qInfo() << "healthd lifecycle: daemon constructed"
             << "db_path=" << databasePath_
-            << "socket_name=" << UiGateway::socketName()
+            << "socket_name=" << config_.ipc.healthSocketPath
             << "tcp_port=" << kHealthdPort
             << "marker_path=" << markerPath_
             << "marker_enabled=" << isMarkerWritingEnabled();
+}
+
+DaemonApp::DaemonApp(QObject *parent)
+    : DaemonApp(loadAppRuntimeConfig(QString()).config, parent) {
 }
 
 bool DaemonApp::start() {
@@ -98,7 +102,7 @@ bool DaemonApp::start() {
         return false;
     }
     qInfo() << "healthd lifecycle: local ui gateway ready"
-            << "socket_name=" << UiGateway::socketName();
+            << "socket_name=" << config_.ipc.healthSocketPath;
 
     started_ = acceptor_.start(kHealthdPort);
     if (started_) {

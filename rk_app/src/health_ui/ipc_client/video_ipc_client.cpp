@@ -1,17 +1,20 @@
 #include "ipc_client/video_ipc_client.h"
 
+#include "runtime_config/app_runtime_config_loader.h"
+
 #include <QDebug>
 #include <QJsonDocument>
 #include <QLocalSocket>
 
 namespace {
-const char kSocketName[] = "rk_video.sock";
-const char kSocketEnvVar[] = "RK_VIDEO_SOCKET_NAME";
 const char kLineSeparator = '\n';
 }
 
-VideoIpcClient::VideoIpcClient(QObject *parent)
+VideoIpcClient::VideoIpcClient(const QString &socketName, QObject *parent)
     : AbstractVideoClient(parent)
+    , socketName_(socketName.isEmpty()
+            ? loadAppRuntimeConfig(QString()).config.ipc.videoSocketPath
+            : socketName)
     , socket_(new QLocalSocket(this)) {
     connect(socket_, &QLocalSocket::readyRead, this, &VideoIpcClient::onReadyRead);
 }
@@ -21,13 +24,11 @@ bool VideoIpcClient::connectToBackend() {
         return true;
     }
 
-    const QString socketName = qEnvironmentVariable(kSocketEnvVar);
-    const QString resolvedSocketName
-        = socketName.isEmpty() ? QString::fromUtf8(kSocketName) : socketName;
-    socket_->connectToServer(resolvedSocketName);
+    socket_->connectToServer(socketName_);
     const bool connected = socket_->waitForConnected(3000);
     qInfo() << "health-ui video ipc: connect result"
             << connected
+            << socketName_
             << socket_->errorString();
     return connected;
 }

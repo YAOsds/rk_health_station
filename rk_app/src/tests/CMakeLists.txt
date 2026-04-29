@@ -160,9 +160,11 @@ set_target_properties(action_classifier_factory_test PROPERTIES
 target_include_directories(action_classifier_factory_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 
 target_link_libraries(action_classifier_factory_test PRIVATE
+    rk_shared
     ${RK_QT_CORE_TARGET}
     ${RK_QT_TEST_TARGET}
 )
@@ -612,6 +614,34 @@ endif()
 
 add_test(NAME ui_app_dashboard_refresh_test COMMAND ui_app_dashboard_refresh_test)
 
+
+add_executable(video_runtime_config_integration_test
+    video_daemon_tests/video_runtime_config_integration_test.cpp
+    ../health_videod/analysis/gstreamer_analysis_output_backend.cpp
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_videod/analysis/rga_frame_converter.cpp
+    ../health_videod/core/video_service.cpp
+    ../health_videod/core/video_storage_service.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
+    ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
+)
+
+set_target_properties(video_runtime_config_integration_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(video_runtime_config_integration_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(video_runtime_config_integration_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+    ${RK_QT_NETWORK_TARGET}
+)
+
+add_test(NAME video_runtime_config_integration_test COMMAND video_runtime_config_integration_test)
 
 add_executable(video_service_test
     video_daemon_tests/video_service_test.cpp
@@ -1259,6 +1289,31 @@ target_link_libraries(rknn_lstm_tensor_shape_test PRIVATE
 )
 
 add_test(NAME rknn_lstm_tensor_shape_test COMMAND rknn_lstm_tensor_shape_test)
+
+add_executable(rknn_lstm_action_classifier_test
+    fall_daemon_tests/rknn_lstm_action_classifier_test.cpp
+    ../health_falld/action/rknn_action_model_runner.cpp
+    ../health_falld/action/rknn_lstm_action_classifier.cpp
+    ../health_falld/action/stgcn_preprocessor.cpp
+)
+
+set_target_properties(rknn_lstm_action_classifier_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(rknn_lstm_action_classifier_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_falld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(rknn_lstm_action_classifier_test PRIVATE
+    rk_shared
+    ${RK_QT_CORE_TARGET}
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME rknn_lstm_action_classifier_test COMMAND rknn_lstm_action_classifier_test)
 
 add_executable(rule_based_action_classifier_test
     fall_daemon_tests/rule_based_action_classifier_test.cpp

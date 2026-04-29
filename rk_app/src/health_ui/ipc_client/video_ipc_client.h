@@ -34,7 +34,7 @@ class VideoIpcClient : public AbstractVideoClient {
     Q_OBJECT
 
 public:
-    explicit VideoIpcClient(QObject *parent = nullptr);
+    explicit VideoIpcClient(const QString &socketName = QString(), QObject *parent = nullptr);
 
     bool connectToBackend() override;
     void requestStatus(const QString &cameraId) override;
@@ -52,6 +52,7 @@ private:
     void sendCommand(const QString &action, const QString &cameraId,
         const QJsonObject &payload = QJsonObject());
 
+    QString socketName_;
     QLocalSocket *socket_ = nullptr;
     QByteArray readBuffer_;
     int nextRequestId_ = 1;

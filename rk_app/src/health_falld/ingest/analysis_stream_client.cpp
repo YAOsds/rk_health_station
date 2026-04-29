@@ -3,6 +3,7 @@
 #include "debug/latency_marker_writer.h"
 #include "protocol/analysis_frame_descriptor_protocol.h"
 #include "protocol/unix_fd_passing.h"
+#include "runtime/runtime_config.h"
 
 #include <QDateTime>
 #include <QLocalSocket>
@@ -14,17 +15,16 @@
 namespace {
 constexpr int kReconnectDelayMs = 300;
 constexpr int kMaxBufferedBytes = 1024 * 1024;
-const char kFallLatencyMarkerEnvVar[] = "RK_FALL_LATENCY_MARKER_PATH";
-const char kAnalysisTransportEnvVar[] = "RK_VIDEO_ANALYSIS_TRANSPORT";
 }
 
-AnalysisStreamClient::AnalysisStreamClient(
-    const QString &socketName, const QString &sharedMemoryNameOverride, QObject *parent)
+AnalysisStreamClient::AnalysisStreamClient(const FallRuntimeConfig &config, QObject *parent)
     : QObject(parent)
-    , socketName_(socketName)
+    , socketName_(config.analysisSocketPath)
     , socket_(new QLocalSocket(this))
     , reconnectTimer_(new QTimer(this))
-    , reader_(sharedMemoryNameOverride) {
+    , reader_(config.analysisSharedMemoryName)
+    , analysisTransport_(config.analysisTransport)
+    , latencyMarkerPath_(config.latencyMarkerPath) {
     reconnectTimer_->setSingleShot(true);
     connect(reconnectTimer_, &QTimer::timeout, this, &AnalysisStreamClient::attemptConnect);
     connect(socket_, &QLocalSocket::readyRead, this, &AnalysisStreamClient::onReadyRead);
@@ -52,6 +52,17 @@ AnalysisStreamClient::AnalysisStreamClient(
         });
 }
 
+AnalysisStreamClient::AnalysisStreamClient(
+    const QString &socketName, const QString &sharedMemoryNameOverride, QObject *parent)
+    : AnalysisStreamClient([&]() {
+          FallRuntimeConfig config;
+          config.analysisSocketPath = socketName;
+          config.analysisSharedMemoryName = sharedMemoryNameOverride;
+          return config;
+      }(),
+          parent) {
+}
+
 void AnalysisStreamClient::start() {
     qRegisterMetaType<AnalysisFramePacket>("AnalysisFramePacket");
     running_ = true;
@@ -74,6 +85,10 @@ void AnalysisStreamClient::attemptConnect() {
     if (dmabufTransportEnabled() && fdSocketFd_ < 0) {
         QString error;
         fdSocketFd_ = connectUnixStreamSocket(fdSocketName(), &error);
+        if (fdSocketFd_ < 0 && !error.isEmpty()) {
+            qWarning() << "analysis_stream_client: failed to connect fd socket"
+                       << fdSocketName() << error;
+        }
     }
 
     if (socket_->state() == QLocalSocket::ConnectedState
@@ -132,7 +147,7 @@ void AnalysisStreamClient::onReadyRead() {
         if (!readOk) {
             continue;
         }
-        LatencyMarkerWriter marker(qEnvironmentVariable(kFallLatencyMarkerEnvVar));
+        LatencyMarkerWriter marker(latencyMarkerPath_);
         marker.writeEvent(QStringLiteral("analysis_descriptor_ingested"),
             QDateTime::currentMSecsSinceEpoch(),
             QJsonObject{
@@ -144,8 +159,8 @@ void AnalysisStreamClient::onReadyRead() {
 }
 
 bool AnalysisStreamClient::dmabufTransportEnabled() const {
-    const QByteArray value = qgetenv(kAnalysisTransportEnvVar).trimmed().toLower();
-    return value == "dmabuf" || value == "dma";
+    const QString value = analysisTransport_.trimmed().toLower();
+    return value == QStringLiteral("dmabuf") || value == QStringLiteral("dma");
 }
 
 QString AnalysisStreamClient::fdSocketName() const {

@@ -13,7 +13,7 @@ class UiIpcClient : public QObject {
     Q_OBJECT
 
 public:
-    explicit UiIpcClient(QObject *parent = nullptr);
+    explicit UiIpcClient(const QString &socketName = QString(), QObject *parent = nullptr);
 
     bool connectToBackend();
     bool isConnected() const;
@@ -45,6 +45,7 @@ private:
         const QJsonObject &payload = QJsonObject());
     void handleMessage(const IpcMessage &message);
 
+    QString socketName_;
     QLocalSocket *socket_ = nullptr;
     QByteArray readBuffer_;
     int nextRequestId_ = 1;

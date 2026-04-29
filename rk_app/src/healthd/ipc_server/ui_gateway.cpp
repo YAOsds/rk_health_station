@@ -2,6 +2,7 @@
 
 #include "device/device_manager.h"
 #include "host/host_wifi_status_provider.h"
+#include "runtime_config/app_runtime_config_loader.h"
 #include "storage/database.h"
 
 #include <QJsonArray>
@@ -14,8 +15,6 @@
 #include <QLocalSocket>
 
 namespace {
-const char kSocketName[] = "rk_health_station.sock";
-const char kSocketEnvVar[] = "RK_HEALTH_STATION_SOCKET_NAME";
 const char kLineSeparator = '\n';
 constexpr int kMaxBufferedBytes = 1024 * 1024;
 }
@@ -51,18 +50,23 @@ bool IpcCodec::decode(const QByteArray &buffer, IpcMessage *out) {
 }
 
 QString UiGateway::socketName() {
-    const QString overrideName = qEnvironmentVariable(kSocketEnvVar);
-    return overrideName.isEmpty() ? QString::fromUtf8(kSocketName) : overrideName;
+    return loadAppRuntimeConfig(QString()).config.ipc.healthSocketPath;
 }
 
-UiGateway::UiGateway(DeviceManager *deviceManager, Database *database,
+UiGateway::UiGateway(const QString &socketName, DeviceManager *deviceManager, Database *database,
     HostWifiStatusProvider *hostWifiStatusProvider, QObject *parent)
     : QObject(parent)
     , deviceManager_(deviceManager)
     , database_(database)
     , hostWifiStatusProvider_(hostWifiStatusProvider)
+    , socketName_(socketName)
     , server_(new QLocalServer(this)) {
     connect(server_, &QLocalServer::newConnection, this, &UiGateway::onNewConnection);
+}
+
+UiGateway::UiGateway(DeviceManager *deviceManager, Database *database,
+    HostWifiStatusProvider *hostWifiStatusProvider, QObject *parent)
+    : UiGateway(socketName(), deviceManager, database, hostWifiStatusProvider, parent) {
 }
 
 UiGateway::~UiGateway() {
@@ -71,14 +75,14 @@ UiGateway::~UiGateway() {
 
 bool UiGateway::start() {
     stop();
-    QLocalServer::removeServer(socketName());
+    QLocalServer::removeServer(socketName_);
     server_->setSocketOptions(QLocalServer::UserAccessOption);
-    const bool ok = server_->listen(socketName());
+    const bool ok = server_->listen(socketName_);
     if (!ok) {
         qWarning() << "ui gateway listen failed:" << server_->errorString();
     } else {
         qInfo() << "healthd ipc: gateway listening"
-                << "socket_name=" << socketName();
+                << "socket_name=" << socketName_;
     }
     return ok;
 }
@@ -97,9 +101,9 @@ void UiGateway::stop() {
     if (server_->isListening()) {
         server_->close();
     }
-    QLocalServer::removeServer(socketName());
+    QLocalServer::removeServer(socketName_);
     qInfo() << "healthd ipc: gateway stopped"
-            << "socket_name=" << socketName();
+            << "socket_name=" << socketName_;
 }
 
 void UiGateway::onNewConnection() {

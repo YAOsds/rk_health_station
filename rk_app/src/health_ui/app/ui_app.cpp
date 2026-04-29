@@ -11,6 +11,7 @@
 #include "pages/history_page.h"
 #include "pages/video_monitor_page.h"
 #include "pages/settings_page.h"
+#include "runtime_config/app_runtime_config_loader.h"
 
 #include <QHBoxLayout>
 #include <QFileDialog>
@@ -28,9 +29,10 @@ namespace {
 constexpr int kDashboardRefreshIntervalMs = 3000;
 }
 
-UiApp::UiApp(QObject *parent)
+UiApp::UiApp(const AppRuntimeConfig &config, QObject *parent)
     : QObject(parent)
-    , client_(new UiIpcClient(this))
+    , config_(config)
+    , client_(new UiIpcClient(config.ipc.healthSocketPath, this))
     , window_(new QMainWindow())
     , stack_(new QStackedWidget(window_))
     , dashboardPage_(new DashboardPage(stack_))
@@ -40,8 +42,8 @@ UiApp::UiApp(QObject *parent)
     , settingsPage_(new SettingsPage(stack_))
     , alertsPage_(new AlertsPage(stack_))
     , historyPage_(new HistoryPage(stack_))
-    , videoClient_(new VideoIpcClient(this))
-    , fallClient_(new FallIpcClient(QString(), this))
+    , videoClient_(new VideoIpcClient(config.ipc.videoSocketPath, this))
+    , fallClient_(new FallIpcClient(config.ipc.fallSocketPath, this))
     , videoMonitorPage_(new VideoMonitorPage(
           videoClient_,
           fallClient_,
@@ -160,6 +162,10 @@ UiApp::UiApp(QObject *parent)
         });
 }
 
+UiApp::UiApp(QObject *parent)
+    : UiApp(loadAppRuntimeConfig(QString()).config, parent) {
+}
+
 bool UiApp::start() {
     window_->show();
 
@@ -185,7 +191,7 @@ void UiApp::openVideoPage() {
     const bool fallConnected = fallClient_->connectToBackend();
     qInfo() << "health-ui lifecycle: video backend connection result" << connected;
     qInfo() << "health-ui lifecycle: fall backend connection result" << fallConnected;
-    videoClient_->requestStatus(QStringLiteral("front_cam"));
+    videoClient_->requestStatus(config_.video.cameraId);
 }
 
 void UiApp::onDeviceListReceived(const QJsonArray &devices) {

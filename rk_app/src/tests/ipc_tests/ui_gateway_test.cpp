@@ -35,7 +35,7 @@ public:
 void UiGatewayTest::requestDeviceList() {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    qputenv("RK_HEALTH_STATION_SOCKET_NAME", tempDir.filePath(QStringLiteral("rk_health_station.sock")).toUtf8());
+    const QString socketPath = tempDir.filePath(QStringLiteral("rk_health_station.sock"));
 
     DeviceManager deviceManager;
     DeviceInfo info;
@@ -44,11 +44,11 @@ void UiGatewayTest::requestDeviceList() {
     info.status = DeviceLifecycleState::Active;
     QVERIFY(deviceManager.updateMetadata(info));
 
-    UiGateway gateway(&deviceManager);
+    UiGateway gateway(socketPath, &deviceManager);
     QVERIFY(gateway.start());
 
     QLocalSocket socket;
-    socket.connectToServer(qEnvironmentVariable("RK_HEALTH_STATION_SOCKET_NAME"));
+    socket.connectToServer(socketPath);
     QVERIFY(socket.waitForConnected(3000));
 
     IpcMessage req {1, QStringLiteral("request"), QStringLiteral("get_device_list"),
@@ -67,14 +67,12 @@ void UiGatewayTest::requestDeviceList() {
     QCOMPARE(devices.size(), 1);
     QCOMPARE(devices.at(0).toObject().value(QStringLiteral("device_id")).toString(),
         QStringLiteral("watch_ipc_001"));
-    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 
 void UiGatewayTest::requestDashboardSnapshotIncludesHostWifi() {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    qputenv("RK_HEALTH_STATION_SOCKET_NAME",
-        tempDir.filePath(QStringLiteral("rk_health_station.sock")).toUtf8());
+    const QString socketPath = tempDir.filePath(QStringLiteral("rk_health_station.sock"));
 
     DeviceManager deviceManager;
     StubHostWifiStatusProvider provider;
@@ -84,11 +82,11 @@ void UiGatewayTest::requestDashboardSnapshotIncludesHostWifi() {
     provider.value.ssid = QStringLiteral("--");
     provider.value.ipv4 = QStringLiteral("--");
 
-    UiGateway gateway(&deviceManager, nullptr, &provider);
+    UiGateway gateway(socketPath, &deviceManager, nullptr, &provider);
     QVERIFY(gateway.start());
 
     QLocalSocket socket;
-    socket.connectToServer(qEnvironmentVariable("RK_HEALTH_STATION_SOCKET_NAME"));
+    socket.connectToServer(socketPath);
     QVERIFY(socket.waitForConnected(3000));
 
     IpcMessage req {1, QStringLiteral("request"), QStringLiteral("get_dashboard_snapshot"),
@@ -108,14 +106,12 @@ void UiGatewayTest::requestDashboardSnapshotIncludesHostWifi() {
     QCOMPARE(hostWifi.value(QStringLiteral("interface_name")).toString(), QStringLiteral("wlan0"));
     QCOMPARE(hostWifi.value(QStringLiteral("ssid")).toString(), QStringLiteral("--"));
     QCOMPARE(hostWifi.value(QStringLiteral("ipv4")).toString(), QStringLiteral("--"));
-    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 
 void UiGatewayTest::approvePendingDeviceViaGateway() {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    qputenv("RK_HEALTH_STATION_SOCKET_NAME",
-        tempDir.filePath(QStringLiteral("rk_health_station.sock")).toUtf8());
+    const QString socketPath = tempDir.filePath(QStringLiteral("rk_health_station.sock"));
 
     Database database;
     QString error;
@@ -129,11 +125,11 @@ void UiGatewayTest::approvePendingDeviceViaGateway() {
     QVERIFY2(database.upsertPendingRequest(request, &error), qPrintable(error));
 
     DeviceManager deviceManager(&database);
-    UiGateway gateway(&deviceManager);
+    UiGateway gateway(socketPath, &deviceManager);
     QVERIFY(gateway.start());
 
     QLocalSocket socket;
-    socket.connectToServer(qEnvironmentVariable("RK_HEALTH_STATION_SOCKET_NAME"));
+    socket.connectToServer(socketPath);
     QVERIFY(socket.waitForConnected(3000));
 
     IpcMessage req;
@@ -160,14 +156,12 @@ void UiGatewayTest::approvePendingDeviceViaGateway() {
 
     Database::PendingDeviceRequest pending;
     QVERIFY(!database.fetchPendingRequest(QStringLiteral("watch_pending_ipc_001"), &pending, &error));
-    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 
 void UiGatewayTest::requestAlertsSnapshot() {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    qputenv("RK_HEALTH_STATION_SOCKET_NAME",
-        tempDir.filePath(QStringLiteral("rk_health_station.sock")).toUtf8());
+    const QString socketPath = tempDir.filePath(QStringLiteral("rk_health_station.sock"));
 
     Database database;
     QString error;
@@ -195,11 +189,11 @@ void UiGatewayTest::requestAlertsSnapshot() {
 
     DeviceManager deviceManager(&database);
     QVERIFY(deviceManager.reloadFromDatabase(info.deviceId));
-    UiGateway gateway(&deviceManager, &database);
+    UiGateway gateway(socketPath, &deviceManager, &database);
     QVERIFY(gateway.start());
 
     QLocalSocket socket;
-    socket.connectToServer(qEnvironmentVariable("RK_HEALTH_STATION_SOCKET_NAME"));
+    socket.connectToServer(socketPath);
     QVERIFY(socket.waitForConnected(3000));
 
     IpcMessage req;
@@ -219,14 +213,12 @@ void UiGatewayTest::requestAlertsSnapshot() {
     QVERIFY(!alerts.isEmpty());
     QCOMPARE(alerts.at(0).toObject().value(QStringLiteral("alert_id")).toString(),
         QStringLiteral("heart_rate_low"));
-    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 
 void UiGatewayTest::requestHistorySeries() {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    qputenv("RK_HEALTH_STATION_SOCKET_NAME",
-        tempDir.filePath(QStringLiteral("rk_health_station.sock")).toUtf8());
+    const QString socketPath = tempDir.filePath(QStringLiteral("rk_health_station.sock"));
 
     Database database;
     QString error;
@@ -249,11 +241,11 @@ void UiGatewayTest::requestHistorySeries() {
     QVERIFY2(database.upsertTelemetryMinuteAgg(second, &error), qPrintable(error));
 
     DeviceManager deviceManager(&database);
-    UiGateway gateway(&deviceManager, &database);
+    UiGateway gateway(socketPath, &deviceManager, &database);
     QVERIFY(gateway.start());
 
     QLocalSocket socket;
-    socket.connectToServer(qEnvironmentVariable("RK_HEALTH_STATION_SOCKET_NAME"));
+    socket.connectToServer(socketPath);
     QVERIFY(socket.waitForConnected(3000));
 
     IpcMessage req;
@@ -280,28 +272,25 @@ void UiGatewayTest::requestHistorySeries() {
     QCOMPARE(bucket.value(QStringLiteral("avg_heart_rate")).toDouble(), 71.0);
     QCOMPARE(bucket.value(QStringLiteral("min_spo2")).toDouble(), 97.0);
     QCOMPARE(bucket.value(QStringLiteral("avg_battery")).toDouble(), 79.0);
-    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 
 void UiGatewayTest::dropsOversizedFrameBuffer() {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    qputenv("RK_HEALTH_STATION_SOCKET_NAME",
-        tempDir.filePath(QStringLiteral("rk_health_station.sock")).toUtf8());
+    const QString socketPath = tempDir.filePath(QStringLiteral("rk_health_station.sock"));
 
     DeviceManager deviceManager;
-    UiGateway gateway(&deviceManager);
+    UiGateway gateway(socketPath, &deviceManager);
     QVERIFY(gateway.start());
 
     QLocalSocket socket;
-    socket.connectToServer(qEnvironmentVariable("RK_HEALTH_STATION_SOCKET_NAME"));
+    socket.connectToServer(socketPath);
     QVERIFY(socket.waitForConnected(3000));
 
     socket.write(QByteArray(1024 * 1024 + 1, 'x'));
     QVERIFY(socket.waitForBytesWritten(3000));
 
     QTRY_VERIFY_WITH_TIMEOUT(socket.state() == QLocalSocket::UnconnectedState, 3000);
-    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 
 QTEST_MAIN(UiGatewayTest)

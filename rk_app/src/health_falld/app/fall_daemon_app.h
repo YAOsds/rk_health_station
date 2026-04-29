@@ -22,6 +22,9 @@ class FallDaemonApp : public QObject {
     Q_OBJECT
 
 public:
+    explicit FallDaemonApp(const FallRuntimeConfig &config, QObject *parent = nullptr);
+    explicit FallDaemonApp(const FallRuntimeConfig &config,
+        std::unique_ptr<PoseEstimator> poseEstimator, QObject *parent = nullptr);
     explicit FallDaemonApp(QObject *parent = nullptr);
     explicit FallDaemonApp(std::unique_ptr<PoseEstimator> poseEstimator, QObject *parent = nullptr);
 

@@ -15,6 +15,24 @@ QString normalizeOptionalPath(const QString &baseDir, const QString &path) {
     }
     return QDir::cleanPath(QDir(baseDir).absoluteFilePath(path));
 }
+
+QString normalizeSocketPath(const QString &baseDir, const QString &path) {
+    if (path.isEmpty()) {
+        return path;
+    }
+
+    const QFileInfo info(path);
+    if (info.isAbsolute()) {
+        return QDir::cleanPath(path);
+    }
+
+    if (baseDir.isEmpty()) {
+        // Compatibility mode: without a config file, preserve the legacy short socket names.
+        return info.fileName();
+    }
+
+    return QDir::cleanPath(QDir(baseDir).absoluteFilePath(path));
+}
 }
 
 QString resolveRuntimeConfigPath(const QString &explicitPath) {
@@ -40,10 +58,10 @@ void normalizeRuntimeConfigPaths(const QString &configPath, AppRuntimeConfig *co
 
     const QString baseDir = configPath.isEmpty() ? QString() : QFileInfo(configPath).absolutePath();
     config->paths.databasePath = normalizeOptionalPath(baseDir, config->paths.databasePath);
-    config->ipc.healthSocketPath = normalizeOptionalPath(baseDir, config->ipc.healthSocketPath);
-    config->ipc.videoSocketPath = normalizeOptionalPath(baseDir, config->ipc.videoSocketPath);
-    config->ipc.analysisSocketPath = normalizeOptionalPath(baseDir, config->ipc.analysisSocketPath);
-    config->ipc.fallSocketPath = normalizeOptionalPath(baseDir, config->ipc.fallSocketPath);
+    config->ipc.healthSocketPath = normalizeSocketPath(baseDir, config->ipc.healthSocketPath);
+    config->ipc.videoSocketPath = normalizeSocketPath(baseDir, config->ipc.videoSocketPath);
+    config->ipc.analysisSocketPath = normalizeSocketPath(baseDir, config->ipc.analysisSocketPath);
+    config->ipc.fallSocketPath = normalizeSocketPath(baseDir, config->ipc.fallSocketPath);
     config->fallDetection.poseModelPath = normalizeOptionalPath(baseDir, config->fallDetection.poseModelPath);
     config->fallDetection.stgcnModelPath = normalizeOptionalPath(baseDir, config->fallDetection.stgcnModelPath);
     config->fallDetection.lstmModelPath = normalizeOptionalPath(baseDir, config->fallDetection.lstmModelPath);

@@ -2,6 +2,8 @@
 
 #include <QObject>
 
+#include "runtime_config/app_runtime_config.h"
+
 class AlertsPage;
 class DashboardPage;
 class DeviceDetailPage;
@@ -24,6 +26,7 @@ class UiApp : public QObject {
     Q_OBJECT
 
 public:
+    explicit UiApp(const AppRuntimeConfig &config, QObject *parent = nullptr);
     explicit UiApp(QObject *parent = nullptr);
 
     bool start();
@@ -39,6 +42,7 @@ private slots:
     void onOperationFinished(const QString &action, bool ok, const QJsonObject &payload);
 
 private:
+    AppRuntimeConfig config_;
     UiIpcClient *client_ = nullptr;
     QMainWindow *window_ = nullptr;
     QStackedWidget *stack_ = nullptr;

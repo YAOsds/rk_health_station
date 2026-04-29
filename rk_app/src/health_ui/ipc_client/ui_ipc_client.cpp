@@ -1,12 +1,12 @@
 #include "ipc_client/ui_ipc_client.h"
 
+#include "runtime_config/app_runtime_config_loader.h"
+
 #include <QDebug>
 #include <QJsonDocument>
 #include <QLocalSocket>
 
 namespace {
-const char kSocketName[] = "rk_health_station.sock";
-const char kSocketEnvVar[] = "RK_HEALTH_STATION_SOCKET_NAME";
 const char kLineSeparator = '\n';
 
 QByteArray encodeMessage(const IpcMessage &message) {
@@ -34,8 +34,11 @@ bool decodeMessage(const QByteArray &buffer, IpcMessage *message) {
 }
 }
 
-UiIpcClient::UiIpcClient(QObject *parent)
+UiIpcClient::UiIpcClient(const QString &socketName, QObject *parent)
     : QObject(parent)
+    , socketName_(socketName.isEmpty()
+            ? loadAppRuntimeConfig(QString()).config.ipc.healthSocketPath
+            : socketName)
     , socket_(new QLocalSocket(this)) {
     connect(socket_, &QLocalSocket::readyRead, this, &UiIpcClient::onReadyRead);
     connect(socket_, &QLocalSocket::connected, this, [this]() {
@@ -57,14 +60,11 @@ bool UiIpcClient::connectToBackend() {
         return true;
     }
 
-    const QString socketName = qEnvironmentVariable(kSocketEnvVar);
-    const QString resolvedSocketName
-        = socketName.isEmpty() ? QString::fromUtf8(kSocketName) : socketName;
-    socket_->connectToServer(resolvedSocketName);
+    socket_->connectToServer(socketName_);
     const bool ok = socket_->waitForConnected(3000);
     if (!ok) {
         qWarning() << "health-ui ipc: connect failed"
-                   << "socket_name=" << resolvedSocketName
+                   << "socket_name=" << socketName_
                    << "error=" << socket_->errorString();
     }
     return ok;

@@ -4,6 +4,7 @@
 #include "models/fall_models.h"
 #include "pipeline/video_pipeline_backend.h"
 #include "protocol/video_ipc.h"
+#include "runtime_config/app_runtime_config.h"
 
 #include <QHash>
 #include <QObject>
@@ -15,6 +16,9 @@ class VideoService : public QObject, private VideoPipelineObserver {
 
 public:
     explicit VideoService(VideoPipelineBackend *pipelineBackend = nullptr,
+        AnalysisOutputBackend *analysisBackend = nullptr, QObject *parent = nullptr);
+    explicit VideoService(const AppRuntimeConfig &runtimeConfig,
+        VideoPipelineBackend *pipelineBackend = nullptr,
         AnalysisOutputBackend *analysisBackend = nullptr, QObject *parent = nullptr);
     ~VideoService() override;
 
@@ -45,6 +49,7 @@ private:
     VideoCommandResult buildOkResult(const QString &cameraId, const QString &action,
         const QJsonObject &payload = QJsonObject()) const;
 
+    AppRuntimeConfig runtimeConfig_;
     QHash<QString, VideoChannelStatus> channels_;
     VideoStorageService storageService_;
     VideoPipelineBackend *pipelineBackend_ = nullptr;

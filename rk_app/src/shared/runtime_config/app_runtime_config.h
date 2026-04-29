@@ -43,7 +43,7 @@ struct FallDetectionRuntimeConfig {
     QString poseModelPath = QStringLiteral("assets/models/yolov8n-pose.rknn");
     QString stgcnModelPath = QStringLiteral("assets/models/stgcn_fall.rknn");
     QString lstmModelPath = QStringLiteral("assets/models/lstm_fall.rknn");
-    QString lstmWeightsPath = QStringLiteral("assets/models/lstm_fall_weights.json");
+    QString lstmWeightsPath;
     QString actionModelPath = QStringLiteral("assets/models/stgcn_fall.onnx");
     QString actionBackend = QStringLiteral("lstm_rknn");
     int maxTracks = 5;

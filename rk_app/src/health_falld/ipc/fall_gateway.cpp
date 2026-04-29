@@ -2,6 +2,8 @@
 
 #include "protocol/fall_ipc.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -19,6 +21,10 @@ FallGateway::~FallGateway() {
 
 bool FallGateway::start() {
     stop();
+    const QFileInfo socketInfo(socketName_);
+    if (socketName_.contains('/') && !socketInfo.absolutePath().isEmpty()) {
+        QDir().mkpath(socketInfo.absolutePath());
+    }
     QLocalServer::removeServer(socketName_);
     server_->setSocketOptions(QLocalServer::UserAccessOption);
     return server_->listen(socketName_);

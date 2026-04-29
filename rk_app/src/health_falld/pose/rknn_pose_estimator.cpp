@@ -1,6 +1,7 @@
 #include "pose/rknn_pose_estimator.h"
 #include "pose/nv12_preprocessor.h"
 #include "pose/pose_stage_timing_logger.h"
+#include "runtime/runtime_config.h"
 
 #ifdef RKAPP_ENABLE_REAL_RKNN_POSE
 #include <QByteArray>
@@ -24,28 +25,18 @@ struct RknnPoseRuntime {
 };
 
 namespace {
-const char kPoseTimingPathEnvVar[] = "RK_FALL_POSE_TIMING_PATH";
-const char kRknnIoMemEnvVar[] = "RK_FALL_RKNN_IO_MEM";
-const char kRknnInputDmaBufEnvVar[] = "RK_FALL_RKNN_INPUT_DMABUF";
-
-QByteArray rknnIoMemEnvValue() {
-    return qgetenv(kRknnIoMemEnvVar).trimmed().toLower();
+QString normalizedIoMemMode(const QString &mode) {
+    return mode.trimmed().toLower();
 }
 
-
-bool rknnInputDmaBufEnabledByEnv() {
-    const QByteArray value = qgetenv(kRknnInputDmaBufEnvVar).trimmed().toLower();
+bool rknnOutputOptimizationEnabled(const QString &ioMemMode) {
+    const QString value = normalizedIoMemMode(ioMemMode);
     return value.isEmpty() || (value != "0" && value != "false" && value != "off");
 }
 
-bool rknnOutputOptimizationEnabledByEnv() {
-    const QByteArray value = rknnIoMemEnvValue();
-    return value.isEmpty() || (value != "0" && value != "false" && value != "off");
-}
-
-bool fullIoMemoryRequestedByEnv() {
-    const QByteArray value = rknnIoMemEnvValue();
-    return value == "zero_copy" || value == "full";
+bool fullIoMemoryRequested(const QString &ioMemMode) {
+    const QString value = normalizedIoMemMode(ioMemMode);
+    return value == QStringLiteral("zero_copy") || value == QStringLiteral("full");
 }
 
 uint32_t tensorMemorySize(const rknn_tensor_attr &attr) {
@@ -70,8 +61,8 @@ void destroyIoMemory(RknnPoseRuntime *runtime) {
     runtime->ioMemReady = false;
 }
 
-bool setupIoMemory(RknnPoseRuntime *runtime) {
-    if (!runtime || runtime->appCtx.rknn_ctx == 0 || !rknnOutputOptimizationEnabledByEnv()
+bool setupIoMemory(RknnPoseRuntime *runtime, const QString &ioMemMode) {
+    if (!runtime || runtime->appCtx.rknn_ctx == 0 || !rknnOutputOptimizationEnabled(ioMemMode)
         || runtime->appCtx.io_num.n_input != 1 || runtime->appCtx.io_num.n_output == 0) {
         return false;
     }
@@ -123,8 +114,8 @@ uint32_t preallocatedOutputSize(const rknn_app_context_t &appCtx, uint32_t index
     return attr.n_elems * sizeof(float);
 }
 
-bool setupPreallocatedOutputs(RknnPoseRuntime *runtime) {
-    if (!runtime || !rknnOutputOptimizationEnabledByEnv() || runtime->appCtx.io_num.n_output == 0) {
+bool setupPreallocatedOutputs(RknnPoseRuntime *runtime, const QString &ioMemMode) {
+    if (!runtime || !rknnOutputOptimizationEnabled(ioMemMode) || runtime->appCtx.io_num.n_output == 0) {
         return false;
     }
 
@@ -212,6 +203,16 @@ PosePreprocessResult preprocessDecodedImageForPose(
 }
 }
 #endif
+
+RknnPoseEstimator::RknnPoseEstimator()
+    : RknnPoseEstimator(FallRuntimeConfig()) {
+}
+
+RknnPoseEstimator::RknnPoseEstimator(const FallRuntimeConfig &config)
+    : poseTimingPath_(config.poseTimingPath)
+    , rknnIoMemMode_(config.rknnIoMemMode)
+    , rknnInputDmabuf_(config.rknnInputDmabuf) {
+}
 
 RknnPoseEstimator::~RknnPoseEstimator() {
 #ifdef RKAPP_ENABLE_REAL_RKNN_POSE
@@ -309,11 +310,11 @@ bool RknnPoseEstimator::loadModel(const QString &path, QString *error) {
         && runtime->appCtx.output_attrs[0].type != RKNN_TENSOR_FLOAT16;
 
     runtime->postProcessReady = (init_post_process() == 0);
-    if (fullIoMemoryRequestedByEnv()) {
-        setupIoMemory(runtime);
+    if (fullIoMemoryRequested(rknnIoMemMode_)) {
+        setupIoMemory(runtime, rknnIoMemMode_);
     }
     if (!runtime->ioMemReady) {
-        setupPreallocatedOutputs(runtime);
+        setupPreallocatedOutputs(runtime, rknnIoMemMode_);
     }
 #endif
 
@@ -326,7 +327,7 @@ bool RknnPoseEstimator::loadModel(const QString &path, QString *error) {
 QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, QString *error) {
 #ifdef RKAPP_ENABLE_REAL_RKNN_POSE
     auto *runtime = static_cast<RknnPoseRuntime *>(runtime_);
-    PoseStageTimingLogger poseTimingLogger(qEnvironmentVariable(kPoseTimingPathEnvVar));
+    PoseStageTimingLogger poseTimingLogger(poseTimingPath_);
     PoseStageTimingSample poseTimingSample;
     QElapsedTimer totalTimer;
     totalTimer.start();
@@ -406,7 +407,7 @@ QVector<PosePerson> RknnPoseEstimator::infer(const AnalysisFramePacket &frame, Q
     const bool framePayloadIsModelInput = frame.payloadTransport == AnalysisPayloadTransport::DmaBuf
         && frame.dmaBufPayload && frame.dmaBufPayload->fd >= 0 && inputBuffer == frame.payload.constData()
         && inputSize > 0;
-    if (rknnInputDmaBufEnabledByEnv() && framePayloadIsModelInput) {
+    if (rknnInputDmabuf_ && framePayloadIsModelInput) {
         frameInputMem = rknn_create_mem_from_fd(runtime->appCtx.rknn_ctx,
             frame.dmaBufPayload->fd, const_cast<char *>(inputBuffer), inputSize, 0);
         if (frameInputMem != nullptr) {

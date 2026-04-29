@@ -1,5 +1,6 @@
 #include "app/ui_app.h"
 #include "protocol/ipc_message.h"
+#include "runtime_config/app_runtime_config.h"
 
 #include <QApplication>
 #include <QJsonDocument>
@@ -21,11 +22,11 @@ void UiAppDashboardRefreshTest::requestsDashboardSnapshotAgainAfterTimerTick() {
     QLocalServer server;
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    const QString socketPath = tempDir.filePath(QStringLiteral("rk_health_station.sock"));
-    qputenv("RK_HEALTH_STATION_SOCKET_NAME", socketPath.toUtf8());
-    QVERIFY(server.listen(socketPath));
+    AppRuntimeConfig config = buildDefaultAppRuntimeConfig();
+    config.ipc.healthSocketPath = tempDir.filePath(QStringLiteral("rk_health_station.sock"));
+    QVERIFY(server.listen(config.ipc.healthSocketPath));
 
-    UiApp app;
+    UiApp app(config);
     QVERIFY(app.start());
 
     QTRY_VERIFY_WITH_TIMEOUT(server.hasPendingConnections(), 3000);
@@ -51,7 +52,6 @@ void UiAppDashboardRefreshTest::requestsDashboardSnapshotAgainAfterTimerTick() {
     });
 
     QTRY_VERIFY_WITH_TIMEOUT(dashboardRequests >= 2, 4500);
-    qunsetenv("RK_HEALTH_STATION_SOCKET_NAME");
 }
 
 QTEST_MAIN(UiAppDashboardRefreshTest)

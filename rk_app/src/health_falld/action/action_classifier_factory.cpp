@@ -33,7 +33,7 @@ private:
 
 std::unique_ptr<ActionClassifier> createActionClassifier(const FallRuntimeConfig &config) {
     if (config.actionBackend == ActionBackendKind::LstmRknn) {
-        return std::make_unique<RknnLstmActionClassifier>();
+        return std::make_unique<RknnLstmActionClassifier>(config);
     }
     if (config.actionBackend == ActionBackendKind::RuleBased) {
         return std::make_unique<RuleBasedActionClassifier>();

@@ -5,6 +5,7 @@
 #include "pipeline/gstreamer_video_pipeline_backend.h"
 #include "pipeline/video_pipeline_backend.h"
 #include "runtime_config/app_runtime_config_loader.h"
+#include "runtime_config/app_runtime_config_paths.h"
 
 #include <QDateTime>
 #include <QDebug>
@@ -13,6 +14,12 @@
 
 namespace {
 const char kDefaultDisplayName[] = "Front Camera";
+
+AppRuntimeConfig normalizeDirectRuntimeConfig(const AppRuntimeConfig &runtimeConfig) {
+    AppRuntimeConfig normalized = runtimeConfig;
+    normalizeRuntimeConfigPaths(QString(), &normalized);
+    return normalized;
+}
 }
 
 VideoService::VideoService(
@@ -23,9 +30,13 @@ VideoService::VideoService(
 VideoService::VideoService(const AppRuntimeConfig &runtimeConfig,
     VideoPipelineBackend *pipelineBackend, AnalysisOutputBackend *analysisBackend, QObject *parent)
     : QObject(parent)
-    , runtimeConfig_(runtimeConfig)
-    , pipelineBackend_(pipelineBackend ? pipelineBackend : new GstreamerVideoPipelineBackend())
-    , analysisBackend_(analysisBackend ? analysisBackend : new GstreamerAnalysisOutputBackend())
+    , runtimeConfig_(normalizeDirectRuntimeConfig(runtimeConfig))
+    , pipelineBackend_(pipelineBackend
+              ? pipelineBackend
+              : static_cast<VideoPipelineBackend *>(new GstreamerVideoPipelineBackend(runtimeConfig_)))
+    , analysisBackend_(analysisBackend
+              ? analysisBackend
+              : static_cast<AnalysisOutputBackend *>(new GstreamerAnalysisOutputBackend(runtimeConfig_)))
     , ownsPipelineBackend_(!pipelineBackend)
     , ownsAnalysisBackend_(!analysisBackend) {
     pipelineBackend_->setObserver(this);

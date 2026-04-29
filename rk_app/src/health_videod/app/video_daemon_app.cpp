@@ -12,7 +12,7 @@ VideoDaemonApp::VideoDaemonApp(const AppRuntimeConfig &config, QObject *parent)
     : QObject(parent)
     , config_(config)
     , service_(new VideoService(config_, nullptr, nullptr, this))
-    , gateway_(new VideoGateway(service_, this)) {
+    , gateway_(new VideoGateway(config_.ipc.videoSocketPath, service_, this)) {
 }
 
 bool VideoDaemonApp::start() {

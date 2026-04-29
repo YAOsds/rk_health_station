@@ -1,6 +1,7 @@
 #include "analysis/gstreamer_analysis_output_backend.h"
 #include "protocol/analysis_frame_descriptor_protocol.h"
 #include "protocol/unix_fd_passing.h"
+#include "runtime_config/app_runtime_config.h"
 
 #include <QHostAddress>
 #include <QLocalSocket>
@@ -31,6 +32,7 @@ class AnalysisOutputBackendTest : public QObject {
 
 private slots:
     void resolvesAnalysisSocketFromEnvironment();
+    void resolvesAnalysisSocketAndDmabufTransportFromRuntimeConfig();
     void publishesDescriptorToLocalSocket();
     void publishesDmaBufDescriptorAndFd();
 };
@@ -40,6 +42,25 @@ void AnalysisOutputBackendTest::resolvesAnalysisSocketFromEnvironment() {
     GstreamerAnalysisOutputBackend backend;
     QCOMPARE(backend.socketPath(), QStringLiteral("/tmp/rk_video_analysis.sock"));
     qunsetenv("RK_VIDEO_ANALYSIS_SOCKET_PATH");
+}
+
+void AnalysisOutputBackendTest::resolvesAnalysisSocketAndDmabufTransportFromRuntimeConfig() {
+    AppRuntimeConfig config;
+    config.ipc.analysisSocketPath = QStringLiteral("/tmp/rk_video_analysis_config_test.sock");
+    config.analysis.transport = QStringLiteral("dmabuf");
+
+    GstreamerAnalysisOutputBackend backend(config);
+    QCOMPARE(backend.socketPath(), QStringLiteral("/tmp/rk_video_analysis_config_test.sock"));
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.previewProfile.fps = 20;
+
+    QString error;
+    QVERIFY(backend.start(status, &error));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(backend.supportsDmaBufFrames());
+    backend.stop(QStringLiteral("front_cam"), &error);
 }
 
 void AnalysisOutputBackendTest::publishesDescriptorToLocalSocket() {

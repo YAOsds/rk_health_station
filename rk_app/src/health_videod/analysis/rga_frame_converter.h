@@ -1,9 +1,13 @@
 #pragma once
 
 #include "analysis/analysis_frame_converter.h"
+#include "runtime_config/app_runtime_config.h"
 
 class RgaFrameConverter : public AnalysisFrameConverter {
 public:
+    RgaFrameConverter();
+    explicit RgaFrameConverter(const AppRuntimeConfig &runtimeConfig);
+
     bool convertNv12ToRgb(const QByteArray &nv12,
         int srcWidth,
         int srcHeight,
@@ -57,4 +61,7 @@ public:
         AnalysisDmaBuffer *rgb,
         AnalysisFrameConversionMetadata *metadata,
         QString *error) override;
+
+private:
+    QString dmaHeapPath_;
 };

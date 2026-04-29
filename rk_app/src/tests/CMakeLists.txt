@@ -649,6 +649,7 @@ add_executable(video_runtime_config_integration_test
     ../health_videod/core/video_service.cpp
     ../health_videod/core/video_storage_service.cpp
     ../health_videod/debug/video_runtime_log_stats.cpp
+    ../health_videod/ipc/video_gateway.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
 )
 

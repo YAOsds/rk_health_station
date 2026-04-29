@@ -29,6 +29,7 @@ public:
         int analysisFps = 0;
         int jpegQuality = 95;
         bool preferDmaInput = false;
+        bool forceDmaIo = false;
     };
 
     using FrameCallback = std::function<void(const QByteArray &)>;

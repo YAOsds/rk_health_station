@@ -1,5 +1,6 @@
 #include "pipeline/gstreamer_video_pipeline_backend.h"
 #include "analysis/shared_memory_frame_ring.h"
+#include "runtime_config/app_runtime_config.h"
 
 #include <fcntl.h>
 #include <QFile>
@@ -284,6 +285,7 @@ private slots:
     void cleanup();
     void rejectsPipelineThatExitsDuringPreviewStartup();
     void rejectsInProcessGstreamerWhenNotBuilt();
+    void rejectsInProcessGstreamerWhenConfiguredInRuntimeConfig();
     void fallsBackToExternalPipelineForTestInputWhenInprocessRequested();
     void returnsTcpMjpegPreviewUrlForRunningPreview();
     void usesGenericFileDecodePipelineForTestInput();
@@ -296,6 +298,7 @@ private slots:
     void publishesRgaDmaInputOutputWhenProvided();
     void rejectsRgaDmaInputOutputWhenConverterFails();
     void selectsUyvyInputFormatForGstDmabufPath();
+    void selectsUyvyInputFormatForConfigDrivenGstDmabufPath();
     void computesStrideBytesForPackedUyvyInput();
     void capturesSnapshotFromPreviewStream();
     void encodesRecordingFromPreviewStream();
@@ -331,6 +334,26 @@ void GstreamerVideoPipelineBackendTest::rejectsInProcessGstreamerWhenNotBuilt() 
     QVERIFY(previewUrl.isEmpty());
 
     qunsetenv("RK_VIDEO_PIPELINE_BACKEND");
+}
+
+void GstreamerVideoPipelineBackendTest::rejectsInProcessGstreamerWhenConfiguredInRuntimeConfig() {
+    AppRuntimeConfig config;
+    config.video.pipelineBackend = QStringLiteral("inproc_gst");
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    status.previewProfile.fps = 30;
+    status.previewProfile.pixelFormat = QStringLiteral("NV12");
+
+    GstreamerVideoPipelineBackend backend(config);
+    QString previewUrl;
+    QString error;
+    QVERIFY(!backend.startPreview(status, &previewUrl, &error));
+    QCOMPARE(error, QStringLiteral("inprocess_gstreamer_not_built"));
+    QVERIFY(previewUrl.isEmpty());
 }
 
 void GstreamerVideoPipelineBackendTest::fallsBackToExternalPipelineForTestInputWhenInprocessRequested() {
@@ -952,20 +975,39 @@ void GstreamerVideoPipelineBackendTest::selectsUyvyInputFormatForGstDmabufPath()
         AnalysisFrameInputFormat::Nv12);
 
     qputenv("RK_VIDEO_GST_FORCE_DMABUF_IO", "1");
+    GstreamerVideoPipelineBackend forceDmaIoBackend;
+    QCOMPARE(forceDmaIoBackend.inProcessAnalysisInputFormatForBackend(
+                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga),
+        AnalysisFrameInputFormat::Uyvy);
+    QCOMPARE(forceDmaIoBackend.inProcessAnalysisInputFormatForBackend(
+                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::GstreamerCpu),
+        AnalysisFrameInputFormat::Nv12);
+
+    qunsetenv("RK_VIDEO_GST_DMABUF_INPUT");
+    GstreamerVideoPipelineBackend noDmaInputBackend;
+    QCOMPARE(noDmaInputBackend.inProcessAnalysisInputFormatForBackend(
+                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga),
+        AnalysisFrameInputFormat::Nv12);
+
+    qunsetenv("RK_VIDEO_GST_FORCE_DMABUF_IO");
+    qunsetenv("RK_VIDEO_RGA_OUTPUT_DMABUF");
+    qunsetenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND");
+}
+
+void GstreamerVideoPipelineBackendTest::selectsUyvyInputFormatForConfigDrivenGstDmabufPath() {
+    AppRuntimeConfig config;
+    config.video.analysisConvertBackend = QStringLiteral("rga");
+    config.analysis.rgaOutputDmabuf = true;
+    config.analysis.gstDmabufInput = true;
+    config.analysis.gstForceDmabufIo = true;
+
+    GstreamerVideoPipelineBackend backend(config);
     QCOMPARE(backend.inProcessAnalysisInputFormatForBackend(
                  GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga),
         AnalysisFrameInputFormat::Uyvy);
     QCOMPARE(backend.inProcessAnalysisInputFormatForBackend(
                  GstreamerVideoPipelineBackend::AnalysisConvertBackend::GstreamerCpu),
         AnalysisFrameInputFormat::Nv12);
-
-    qunsetenv("RK_VIDEO_GST_DMABUF_INPUT");
-    QCOMPARE(backend.inProcessAnalysisInputFormatForBackend(
-                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga),
-        AnalysisFrameInputFormat::Nv12);
-
-    qunsetenv("RK_VIDEO_RGA_OUTPUT_DMABUF");
-    qunsetenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND");
 }
 
 void GstreamerVideoPipelineBackendTest::computesStrideBytesForPackedUyvyInput() {

@@ -2,6 +2,8 @@
 
 #include "core/video_service.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -19,9 +21,14 @@ QString VideoGateway::socketName() {
 }
 
 VideoGateway::VideoGateway(VideoService *service, QObject *parent)
+    : VideoGateway(socketName(), service, parent) {
+}
+
+VideoGateway::VideoGateway(const QString &socketName, VideoService *service, QObject *parent)
     : QObject(parent)
     , service_(service)
-    , server_(new QLocalServer(this)) {
+    , server_(new QLocalServer(this))
+    , socketNameValue_(socketName) {
     connect(server_, &QLocalServer::newConnection, this, &VideoGateway::onNewConnection);
 }
 
@@ -31,9 +38,14 @@ VideoGateway::~VideoGateway() {
 
 bool VideoGateway::start() {
     stop();
-    QLocalServer::removeServer(socketName());
+    const QString path = socketName_();
+    const QFileInfo info(path);
+    if (info.isAbsolute() && !info.absolutePath().isEmpty()) {
+        QDir().mkpath(info.absolutePath());
+    }
+    QLocalServer::removeServer(path);
     server_->setSocketOptions(QLocalServer::UserAccessOption);
-    return server_->listen(socketName());
+    return server_->listen(path);
 }
 
 void VideoGateway::stop() {
@@ -50,7 +62,11 @@ void VideoGateway::stop() {
     if (server_->isListening()) {
         server_->close();
     }
-    QLocalServer::removeServer(socketName());
+    QLocalServer::removeServer(socketName_());
+}
+
+QString VideoGateway::socketName_() const {
+    return socketNameValue_;
 }
 
 void VideoGateway::onNewConnection() {

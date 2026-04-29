@@ -1,6 +1,7 @@
 #pragma once
 
 #include "analysis/analysis_output_backend.h"
+#include "runtime_config/app_runtime_config.h"
 
 #include <QHash>
 #include <QList>
@@ -14,6 +15,7 @@ class GstreamerAnalysisOutputBackend : public QObject, public AnalysisOutputBack
 
 public:
     explicit GstreamerAnalysisOutputBackend(QObject *parent = nullptr);
+    explicit GstreamerAnalysisOutputBackend(const AppRuntimeConfig &runtimeConfig, QObject *parent = nullptr);
     ~GstreamerAnalysisOutputBackend() override;
 
     QString socketPath() const;
@@ -43,4 +45,5 @@ private:
     int fdServerFd_ = -1;
     QLocalServer *localServer_ = nullptr;
     QString activeCameraId_;
+    AppRuntimeConfig runtimeConfig_;
 };

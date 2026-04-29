@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QLocalSocket>
+#include <QTemporaryDir>
 #include <QtTest/QTest>
 
 class FakeVideoPipelineBackend : public VideoPipelineBackend {
@@ -60,14 +61,16 @@ private slots:
 };
 
 void VideoGatewayTest::returnsStatusForGetStatus() {
-    qputenv("RK_VIDEO_SOCKET_NAME", QByteArray("/tmp/rk_video_gateway_test.sock"));
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString socketPath = dir.filePath(QStringLiteral("rk_video_gateway_test.sock"));
 
     VideoService service;
-    VideoGateway gateway(&service);
+    VideoGateway gateway(socketPath, &service);
     QVERIFY(gateway.start());
 
     QLocalSocket socket;
-    socket.connectToServer(VideoGateway::socketName());
+    socket.connectToServer(socketPath);
     QVERIFY(socket.waitForConnected(1000));
 
     VideoCommand command;
@@ -80,15 +83,16 @@ void VideoGatewayTest::returnsStatusForGetStatus() {
     QVERIFY(socket.readAll().contains("front_cam"));
 
     gateway.stop();
-    qunsetenv("RK_VIDEO_SOCKET_NAME");
 }
 
 void VideoGatewayTest::routesStartTestInputCommand() {
-    qputenv("RK_VIDEO_SOCKET_NAME", QByteArray("/tmp/rk_video_gateway_test.sock"));
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString socketPath = dir.filePath(QStringLiteral("rk_video_gateway_test.sock"));
 
     FakeVideoPipelineBackend backend;
     VideoService service(&backend, nullptr);
-    VideoGateway gateway(&service);
+    VideoGateway gateway(socketPath, &service);
     QVERIFY(gateway.start());
 
     const QString path = QDir::temp().filePath(QStringLiteral("fall-demo.mp4"));
@@ -97,7 +101,7 @@ void VideoGatewayTest::routesStartTestInputCommand() {
     file.close();
 
     QLocalSocket socket;
-    socket.connectToServer(VideoGateway::socketName());
+    socket.connectToServer(socketPath);
     QVERIFY(socket.waitForConnected(1000));
 
     VideoCommand command;
@@ -120,18 +124,19 @@ void VideoGatewayTest::routesStartTestInputCommand() {
     QCOMPARE(result.action, QStringLiteral("start_test_input"));
 
     gateway.stop();
-    qunsetenv("RK_VIDEO_SOCKET_NAME");
 }
 
 void VideoGatewayTest::dropsOversizedFrameBuffer() {
-    qputenv("RK_VIDEO_SOCKET_NAME", QByteArray("/tmp/rk_video_gateway_oversized_test.sock"));
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString socketPath = dir.filePath(QStringLiteral("rk_video_gateway_oversized_test.sock"));
 
     VideoService service;
-    VideoGateway gateway(&service);
+    VideoGateway gateway(socketPath, &service);
     QVERIFY(gateway.start());
 
     QLocalSocket socket;
-    socket.connectToServer(VideoGateway::socketName());
+    socket.connectToServer(socketPath);
     QVERIFY(socket.waitForConnected(1000));
 
     socket.write(QByteArray(1024 * 1024 + 1, 'x'));
@@ -140,7 +145,6 @@ void VideoGatewayTest::dropsOversizedFrameBuffer() {
     QTRY_VERIFY_WITH_TIMEOUT(socket.state() == QLocalSocket::UnconnectedState, 3000);
 
     gateway.stop();
-    qunsetenv("RK_VIDEO_SOCKET_NAME");
 }
 
 QTEST_MAIN(VideoGatewayTest)

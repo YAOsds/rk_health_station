@@ -3,6 +3,7 @@
 #include "pipeline/video_pipeline_backend.h"
 #include "debug/video_runtime_log_stats.h"
 #include "analysis/rga_frame_converter.h"
+#include "runtime_config/app_runtime_config.h"
 
 #include <QByteArray>
 #include <QHash>
@@ -15,6 +16,7 @@ class InprocessGstreamerPipeline;
 class GstreamerVideoPipelineBackend : public VideoPipelineBackend {
 public:
     GstreamerVideoPipelineBackend();
+    explicit GstreamerVideoPipelineBackend(const AppRuntimeConfig &runtimeConfig);
     ~GstreamerVideoPipelineBackend() override;
 
     void setObserver(VideoPipelineObserver *observer) override;
@@ -93,6 +95,7 @@ private:
     void stopAllPipelines();
 
     QHash<QString, ActivePipeline> pipelines_;
+    AppRuntimeConfig runtimeConfig_;
     VideoPipelineObserver *observer_ = nullptr;
     AnalysisFrameSource *analysisFrameSource_ = nullptr;
     AnalysisFrameConverter *analysisFrameConverter_ = nullptr;

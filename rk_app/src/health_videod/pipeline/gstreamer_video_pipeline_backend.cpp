@@ -3,6 +3,7 @@
 #include "analysis/analysis_output_backend.h"
 #include "debug/latency_marker_writer.h"
 #include "analysis/shared_memory_frame_ring.h"
+#include "runtime_config/app_runtime_config_loader.h"
 #if defined(RKAPP_ENABLE_INPROCESS_GSTREAMER) && RKAPP_ENABLE_INPROCESS_GSTREAMER
 #include "pipeline/inprocess_gstreamer_pipeline.h"
 #endif
@@ -35,15 +36,7 @@ const int kAnalysisOutputWidth = 640;
 const int kAnalysisOutputHeight = 640;
 const quint16 kAnalysisRingSlotCount = 32;
 const int kPreviewJpegQuality = 95;
-const char kGstLaunchEnvVar[] = "RK_VIDEO_GST_LAUNCH_BIN";
 const char kDefaultGstLaunchBinary[] = "gst-launch-1.0";
-const char kVideoLatencyMarkerEnvVar[] = "RK_VIDEO_LATENCY_MARKER_PATH";
-const char kAnalysisConvertBackendEnvVar[] = "RK_VIDEO_ANALYSIS_CONVERT_BACKEND";
-const char kVideoPipelineBackendEnvVar[] = "RK_VIDEO_PIPELINE_BACKEND";
-const char kAnalysisDmaHeapEnvVar[] = "RK_VIDEO_ANALYSIS_DMA_HEAP";
-const char kRgaOutputDmaBufEnvVar[] = "RK_VIDEO_RGA_OUTPUT_DMABUF";
-const char kGstDmaBufInputEnvVar[] = "RK_VIDEO_GST_DMABUF_INPUT";
-const char kGstForceDmaIoEnvVar[] = "RK_VIDEO_GST_FORCE_DMABUF_IO";
 const char kDefaultAnalysisDmaHeap[] = "/dev/dma_heap/system-uncached-dma32";
 const int kPreviewFrameReadTimeoutMs = 5000;
 
@@ -211,11 +204,6 @@ bool writePayloadToDmaBuffer(int fd, const QByteArray &payload, QString *error) 
     return true;
 }
 
-QString analysisDmaHeapPath() {
-    const QString heap = qEnvironmentVariable(kAnalysisDmaHeapEnvVar).trimmed();
-    return heap.isEmpty() ? QString::fromLatin1(kDefaultAnalysisDmaHeap) : heap;
-}
-
 int nv12FrameBytes(int width, int height) {
     return width > 0 && height > 0 ? width * height * 3 / 2 : 0;
 }
@@ -236,34 +224,16 @@ int rgbFrameBytes(int width, int height) {
     return width > 0 && height > 0 ? width * height * 3 : 0;
 }
 
-bool inProcessGstreamerRequested() {
-    const QString requested = qEnvironmentVariable(kVideoPipelineBackendEnvVar).trimmed().toLower();
-    return requested == QStringLiteral("inproc_gst")
-        || requested == QStringLiteral("inprocess_gstreamer")
-        || requested == QStringLiteral("inprocess");
 }
 
-bool envFlagEnabled(const char *name) {
-    const QString requested = qEnvironmentVariable(name).trimmed().toLower();
-    return requested == QStringLiteral("1") || requested == QStringLiteral("true")
-        || requested == QStringLiteral("yes") || requested == QStringLiteral("on")
-        || requested == QStringLiteral("dmabuf");
+GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend()
+    : GstreamerVideoPipelineBackend(loadAppRuntimeConfig(QString()).config) {
 }
 
-bool rgaOutputDmaBufRequested() {
-    return envFlagEnabled(kRgaOutputDmaBufEnvVar);
+GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend(const AppRuntimeConfig &runtimeConfig)
+    : runtimeConfig_(runtimeConfig)
+    , defaultRgaFrameConverter_(runtimeConfig) {
 }
-
-bool gstDmaBufInputRequested() {
-    return envFlagEnabled(kGstDmaBufInputEnvVar);
-}
-
-bool gstForceDmaIoRequested() {
-    return envFlagEnabled(kGstForceDmaIoEnvVar);
-}
-}
-
-GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend() = default;
 
 GstreamerVideoPipelineBackend::~GstreamerVideoPipelineBackend() {
     stopAllPipelines();
@@ -283,7 +253,11 @@ void GstreamerVideoPipelineBackend::setAnalysisFrameConverter(AnalysisFrameConve
 
 bool GstreamerVideoPipelineBackend::startPreview(
     const VideoChannelStatus &status, QString *previewUrl, QString *error) {
-    if (inProcessGstreamerRequested() && status.inputMode != QStringLiteral("test_file")) {
+    const QString requestedBackend = runtimeConfig_.video.pipelineBackend.trimmed().toLower();
+    const bool useInprocessBackend = requestedBackend == QStringLiteral("inproc_gst")
+        || requestedBackend == QStringLiteral("inprocess_gstreamer")
+        || requestedBackend == QStringLiteral("inprocess");
+    if (useInprocessBackend && status.inputMode != QStringLiteral("test_file")) {
 #if defined(RKAPP_ENABLE_INPROCESS_GSTREAMER) && RKAPP_ENABLE_INPROCESS_GSTREAMER
         return startInProcessPreview(status, previewUrl, error);
 #else
@@ -398,7 +372,9 @@ bool GstreamerVideoPipelineBackend::startInProcessPreview(
     config.analysisInputStrideBytes = strideBytesForAnalysisInputFormat(
         analysisInputFormat, status.previewProfile.width);
     config.jpegQuality = kPreviewJpegQuality;
-    config.preferDmaInput = gstDmaBufInputRequested() && rgaOutputDmaBufRequested();
+    config.preferDmaInput = runtimeConfig_.analysis.gstDmabufInput
+        && runtimeConfig_.analysis.rgaOutputDmabuf;
+    config.forceDmaIo = config.preferDmaInput && runtimeConfig_.analysis.gstForceDmabufIo;
 
     if (!inprocessPipeline->start(config, error)) {
         ActivePipeline failedPipeline = pipelines_.take(status.cameraId);
@@ -441,7 +417,9 @@ AnalysisFrameInputFormat
 GstreamerVideoPipelineBackend::inProcessAnalysisInputFormatForBackend(
     AnalysisConvertBackend backend) const {
     return backend == AnalysisConvertBackend::Rga
-            && gstDmaBufInputRequested() && rgaOutputDmaBufRequested() && gstForceDmaIoRequested()
+            && runtimeConfig_.analysis.gstDmabufInput
+            && runtimeConfig_.analysis.rgaOutputDmabuf
+            && runtimeConfig_.analysis.gstForceDmabufIo
         ? AnalysisFrameInputFormat::Uyvy
         : AnalysisFrameInputFormat::Nv12;
 }
@@ -510,8 +488,8 @@ bool GstreamerVideoPipelineBackend::stopRecording(const QString &cameraId, QStri
 }
 
 QString GstreamerVideoPipelineBackend::gstLaunchBinary() const {
-    const QString overrideBinary = qEnvironmentVariable(kGstLaunchEnvVar);
-    return overrideBinary.isEmpty() ? QString::fromUtf8(kDefaultGstLaunchBinary) : overrideBinary;
+    const QString configuredBinary = runtimeConfig_.video.gstLaunchBin.trimmed();
+    return configuredBinary.isEmpty() ? QString::fromUtf8(kDefaultGstLaunchBinary) : configuredBinary;
 }
 
 QString GstreamerVideoPipelineBackend::shellQuote(const QString &value) const {
@@ -660,7 +638,7 @@ QString GstreamerVideoPipelineBackend::buildAnalysisTapCommandFragment(
 
 GstreamerVideoPipelineBackend::AnalysisConvertBackend
 GstreamerVideoPipelineBackend::analysisConvertBackendForProfile(const VideoProfile &sourceProfile) const {
-    const QString requested = qEnvironmentVariable(kAnalysisConvertBackendEnvVar).trimmed().toLower();
+    const QString requested = runtimeConfig_.video.analysisConvertBackend.trimmed().toLower();
     if (requested == QStringLiteral("gstreamer_cpu") || requested == QStringLiteral("cpu")) {
         return AnalysisConvertBackend::GstreamerCpu;
     }
@@ -844,7 +822,7 @@ bool GstreamerVideoPipelineBackend::processAnalysisFrameDma(
     ActivePipeline &pipeline = pipelines_[cameraId];
     if (pipeline.analysisInputFrameBytes <= 0
         || pipeline.analysisConvertBackend != AnalysisConvertBackend::Rga
-        || !rgaOutputDmaBufRequested()) {
+        || !runtimeConfig_.analysis.rgaOutputDmabuf) {
         return false;
     }
 
@@ -924,7 +902,7 @@ bool GstreamerVideoPipelineBackend::processAnalysisFrameDma(
                    .arg(summary->consumerConnected ? 1 : 0);
     }
 
-    LatencyMarkerWriter marker(qEnvironmentVariable(kVideoLatencyMarkerEnvVar));
+    LatencyMarkerWriter marker(runtimeConfig_.debug.videoLatencyMarkerPath);
     marker.writeEvent(QStringLiteral("analysis_descriptor_published"), descriptor.timestampMs,
         QJsonObject{
             {QStringLiteral("camera_id"), descriptor.cameraId},
@@ -957,7 +935,7 @@ void GstreamerVideoPipelineBackend::processAnalysisFrameBytes(
         AnalysisFrameConverter *converter = analysisFrameConverter_
             ? analysisFrameConverter_
             : &defaultRgaFrameConverter_;
-        if (rgaOutputDmaBufRequested() && analysisFrameSource_
+        if (runtimeConfig_.analysis.rgaOutputDmabuf && analysisFrameSource_
             && analysisFrameSource_->supportsDmaBufFrames()) {
             AnalysisDmaBuffer dmaBuffer;
             QString dmaConvertError;
@@ -1025,7 +1003,7 @@ void GstreamerVideoPipelineBackend::processAnalysisFrameBytes(
                                .arg(summary->consumerConnected ? 1 : 0);
                 }
 
-                LatencyMarkerWriter marker(qEnvironmentVariable(kVideoLatencyMarkerEnvVar));
+                LatencyMarkerWriter marker(runtimeConfig_.debug.videoLatencyMarkerPath);
                 marker.writeEvent(QStringLiteral("analysis_descriptor_published"), descriptor.timestampMs,
                     QJsonObject{
                         {QStringLiteral("camera_id"), descriptor.cameraId},
@@ -1114,7 +1092,10 @@ void GstreamerVideoPipelineBackend::processAnalysisFrameBytes(
         bool publishedViaDmaBuf = false;
         if (analysisFrameSource_->supportsDmaBufFrames()) {
             QString dmaError;
-            const int dmaFd = allocateDmaHeapBuffer(analysisDmaHeapPath(), packet.payload.size(), &dmaError);
+            const QString dmaHeapPath = runtimeConfig_.analysis.dmaHeap.trimmed().isEmpty()
+                ? QString::fromLatin1(kDefaultAnalysisDmaHeap)
+                : runtimeConfig_.analysis.dmaHeap.trimmed();
+            const int dmaFd = allocateDmaHeapBuffer(dmaHeapPath, packet.payload.size(), &dmaError);
             if (dmaFd >= 0 && writePayloadToDmaBuffer(dmaFd, packet.payload, &dmaError)) {
                 descriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
                 descriptor.dmaBufPlaneCount = 1;
@@ -1174,7 +1155,7 @@ void GstreamerVideoPipelineBackend::processAnalysisFrameBytes(
                        .arg(summary->consumerConnected ? 1 : 0);
         }
 
-        LatencyMarkerWriter marker(qEnvironmentVariable(kVideoLatencyMarkerEnvVar));
+        LatencyMarkerWriter marker(runtimeConfig_.debug.videoLatencyMarkerPath);
         marker.writeEvent(QStringLiteral("analysis_descriptor_published"), packet.timestampMs,
             QJsonObject{
                 {QStringLiteral("camera_id"), packet.cameraId},

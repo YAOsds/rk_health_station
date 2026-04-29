@@ -2,7 +2,10 @@
 
 #include "protocol/analysis_frame_descriptor_protocol.h"
 #include "protocol/unix_fd_passing.h"
+#include "runtime_config/app_runtime_config_loader.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QLocalServer>
 #include <QLocalSocket>
 
@@ -10,15 +13,19 @@
 #include <unistd.h>
 
 namespace {
-const char kAnalysisSocketEnvVar[] = "RK_VIDEO_ANALYSIS_SOCKET_PATH";
-const char kAnalysisTransportEnvVar[] = "RK_VIDEO_ANALYSIS_TRANSPORT";
 const int kAnalysisFrameWidth = 640;
 const int kAnalysisFrameHeight = 640;
 }
 
 GstreamerAnalysisOutputBackend::GstreamerAnalysisOutputBackend(QObject *parent)
+    : GstreamerAnalysisOutputBackend(loadAppRuntimeConfig(QString()).config, parent) {
+}
+
+GstreamerAnalysisOutputBackend::GstreamerAnalysisOutputBackend(
+    const AppRuntimeConfig &runtimeConfig, QObject *parent)
     : QObject(parent)
-    , localServer_(new QLocalServer(this)) {
+    , localServer_(new QLocalServer(this))
+    , runtimeConfig_(runtimeConfig) {
     connect(localServer_, &QLocalServer::newConnection,
         this, &GstreamerAnalysisOutputBackend::onNewLocalConnection);
 }
@@ -29,8 +36,9 @@ GstreamerAnalysisOutputBackend::~GstreamerAnalysisOutputBackend() {
 }
 
 QString GstreamerAnalysisOutputBackend::socketPath() const {
-    const QString path = qEnvironmentVariable(kAnalysisSocketEnvVar);
-    return path.isEmpty() ? QStringLiteral("/tmp/rk_video_analysis.sock") : path;
+    return runtimeConfig_.ipc.analysisSocketPath.trimmed().isEmpty()
+        ? QStringLiteral("/tmp/rk_video_analysis.sock")
+        : runtimeConfig_.ipc.analysisSocketPath.trimmed();
 }
 
 bool GstreamerAnalysisOutputBackend::start(const VideoChannelStatus &status, QString *error) {
@@ -195,6 +203,10 @@ void GstreamerAnalysisOutputBackend::ensureLocalServer(QString *error) {
         return;
     }
 
+    const QFileInfo socketInfo(socketPath());
+    if (!socketInfo.absolutePath().isEmpty()) {
+        QDir().mkpath(socketInfo.absolutePath());
+    }
     QLocalServer::removeServer(socketPath());
     if (!localServer_->listen(socketPath()) && error) {
         *error = localServer_->errorString();
@@ -233,8 +245,8 @@ QString GstreamerAnalysisOutputBackend::fdSocketPath() const {
 }
 
 bool GstreamerAnalysisOutputBackend::dmabufTransportEnabled() const {
-    const QByteArray value = qgetenv(kAnalysisTransportEnvVar).trimmed().toLower();
-    return value == "dmabuf" || value == "dma";
+    const QString value = runtimeConfig_.analysis.transport.trimmed().toLower();
+    return value == QStringLiteral("dmabuf") || value == QStringLiteral("dma");
 }
 
 void GstreamerAnalysisOutputBackend::ensureFdServer(QString *error) {
@@ -243,6 +255,10 @@ void GstreamerAnalysisOutputBackend::ensureFdServer(QString *error) {
     }
     if (fdServerFd_ >= 0) {
         return;
+    }
+    const QFileInfo fdSocketInfo(fdSocketPath());
+    if (!fdSocketInfo.absolutePath().isEmpty()) {
+        QDir().mkpath(fdSocketInfo.absolutePath());
     }
     fdServerFd_ = createUnixStreamServerSocket(fdSocketPath(), error);
 }

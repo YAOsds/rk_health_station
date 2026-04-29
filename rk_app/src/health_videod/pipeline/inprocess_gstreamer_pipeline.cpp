@@ -18,7 +18,6 @@
 namespace {
 const int kStartTimeoutMs = 5000;
 const int kBusPollIntervalMs = 200;
-const char kGstForceDmaIoEnvVar[] = "RK_VIDEO_GST_FORCE_DMABUF_IO";
 
 void ensureGstreamerInitialized() {
     static std::once_flag initFlag;
@@ -33,15 +32,6 @@ QString gstQuote(const QString &value) {
     escaped.replace(QStringLiteral("\""), QStringLiteral("\\\""));
     return QStringLiteral("\"%1\"").arg(escaped);
 }
-
-
-bool envFlagEnabled(const char *name) {
-    const QString requested = qEnvironmentVariable(name).trimmed().toLower();
-    return requested == QStringLiteral("1") || requested == QStringLiteral("true")
-        || requested == QStringLiteral("yes") || requested == QStringLiteral("on")
-        || requested == QStringLiteral("dmabuf");
-}
-
 
 
 GstPadProbeReturn answerAppsinkAllocationQuery(GstPad *, GstPadProbeInfo *info, gpointer) {
@@ -251,8 +241,7 @@ QString InprocessGstreamerPipeline::buildLaunchDescription(const Config &config)
         ? config.analysisInputPixelFormat
         : profile.pixelFormat;
 
-    const bool forceDmaIo = config.preferDmaInput && config.rgaAnalysis
-        && envFlagEnabled(kGstForceDmaIoEnvVar);
+    const bool forceDmaIo = config.preferDmaInput && config.rgaAnalysis && config.forceDmaIo;
     const QString sourceElement = forceDmaIo
         ? QStringLiteral("v4l2src device=%1 io-mode=dmabuf").arg(gstQuote(config.status.devicePath))
         : QStringLiteral("v4l2src device=%1").arg(gstQuote(config.status.devicePath));

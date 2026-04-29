@@ -1,4 +1,5 @@
 #include "analysis/rga_frame_converter.h"
+#include "runtime_config/app_runtime_config_loader.h"
 
 #ifndef RKAPP_ENABLE_RGA_ANALYSIS_CONVERT
 #define RKAPP_ENABLE_RGA_ANALYSIS_CONVERT 0
@@ -33,20 +34,14 @@ int uyvyFrameBytes(int width, int height) {
     return width > 0 && height > 0 ? width * height * 2 : 0;
 }
 
-#if RKAPP_ENABLE_RGA_ANALYSIS_CONVERT
-const char kAnalysisDmaHeapEnvVar[] = "RK_VIDEO_ANALYSIS_DMA_HEAP";
 const char kDefaultAnalysisDmaHeap[] = "/dev/dma_heap/system-uncached-dma32";
 
+#if RKAPP_ENABLE_RGA_ANALYSIS_CONVERT
 QString errnoMessage(const char *prefix) {
     return QStringLiteral("%1_%2_%3")
         .arg(QString::fromLatin1(prefix))
         .arg(errno)
         .arg(QString::fromLocal8Bit(strerror(errno)));
-}
-
-QString analysisDmaHeapPath() {
-    const QString heap = qEnvironmentVariable(kAnalysisDmaHeapEnvVar).trimmed();
-    return heap.isEmpty() ? QString::fromLatin1(kDefaultAnalysisDmaHeap) : heap;
 }
 
 // The C++ wrapbuffer_handle overload takes (handle, width, height, format, wstride, hstride),
@@ -94,6 +89,16 @@ bool fillDmaBufferFallback(int fd, int bytes, char value) {
     return true;
 }
 #endif
+}
+
+RgaFrameConverter::RgaFrameConverter()
+    : RgaFrameConverter(loadAppRuntimeConfig(QString()).config) {
+}
+
+RgaFrameConverter::RgaFrameConverter(const AppRuntimeConfig &runtimeConfig)
+    : dmaHeapPath_(runtimeConfig.analysis.dmaHeap.trimmed().isEmpty()
+              ? QString::fromLatin1(kDefaultAnalysisDmaHeap)
+              : runtimeConfig.analysis.dmaHeap.trimmed()) {
 }
 
 bool RgaFrameConverter::convertNv12ToRgb(const QByteArray &nv12,
@@ -220,7 +225,7 @@ bool RgaFrameConverter::convertNv12ToRgbDma(const QByteArray &nv12,
 
 #if RKAPP_ENABLE_RGA_ANALYSIS_CONVERT
     QString dmaError;
-    const int outputFd = allocateDmaHeapBuffer(analysisDmaHeapPath(), outputBytes, &dmaError);
+    const int outputFd = allocateDmaHeapBuffer(dmaHeapPath_, outputBytes, &dmaError);
     if (outputFd < 0) {
         if (error) {
             *error = dmaError.isEmpty() ? QStringLiteral("analysis_dma_heap_alloc_failed") : dmaError;
@@ -350,7 +355,7 @@ bool RgaFrameConverter::convertNv12DmaToRgbDma(const AnalysisDmaBuffer &nv12,
 
 #if RKAPP_ENABLE_RGA_ANALYSIS_CONVERT
     QString dmaError;
-    const int outputFd = allocateDmaHeapBuffer(analysisDmaHeapPath(), outputBytes, &dmaError);
+    const int outputFd = allocateDmaHeapBuffer(dmaHeapPath_, outputBytes, &dmaError);
     if (outputFd < 0) {
         if (error) {
             *error = dmaError.isEmpty() ? QStringLiteral("analysis_dma_heap_alloc_failed") : dmaError;
@@ -564,7 +569,7 @@ bool RgaFrameConverter::convertUyvyToRgbDma(const QByteArray &uyvy,
 
 #if RKAPP_ENABLE_RGA_ANALYSIS_CONVERT
     QString dmaError;
-    const int outputFd = allocateDmaHeapBuffer(analysisDmaHeapPath(), outputBytes, &dmaError);
+    const int outputFd = allocateDmaHeapBuffer(dmaHeapPath_, outputBytes, &dmaError);
     if (outputFd < 0) {
         if (error) {
             *error = dmaError.isEmpty() ? QStringLiteral("analysis_dma_heap_alloc_failed") : dmaError;
@@ -682,7 +687,7 @@ bool RgaFrameConverter::convertUyvyDmaToRgbDma(const AnalysisDmaBuffer &uyvy,
 
 #if RKAPP_ENABLE_RGA_ANALYSIS_CONVERT
     QString dmaError;
-    const int outputFd = allocateDmaHeapBuffer(analysisDmaHeapPath(), outputBytes, &dmaError);
+    const int outputFd = allocateDmaHeapBuffer(dmaHeapPath_, outputBytes, &dmaError);
     if (outputFd < 0) {
         if (error) {
             *error = dmaError.isEmpty() ? QStringLiteral("analysis_dma_heap_alloc_failed") : dmaError;

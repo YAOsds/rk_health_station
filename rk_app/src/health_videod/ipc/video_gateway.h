@@ -16,6 +16,7 @@ class VideoGateway : public QObject {
 public:
     static QString socketName();
 
+    explicit VideoGateway(const QString &socketName, VideoService *service, QObject *parent = nullptr);
     explicit VideoGateway(VideoService *service, QObject *parent = nullptr);
     ~VideoGateway() override;
 
@@ -34,8 +35,10 @@ private:
     VideoCommandResult buildStatusResult(const QString &cameraId, const QString &requestId) const;
     VideoCommandResult buildErrorResult(const QString &action, const QString &requestId,
         const QString &cameraId, const QString &errorCode) const;
+    QString socketName_() const;
 
     VideoService *service_ = nullptr;
     QLocalServer *server_ = nullptr;
     QHash<QLocalSocket *, QByteArray> readBuffers_;
+    QString socketNameValue_;
 };

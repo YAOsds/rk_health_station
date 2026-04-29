@@ -789,6 +789,44 @@ RK_VIDEO_ANALYSIS_TRANSPORT=shared_memory
 - `fall marker` 中 `input_dmabuf_path=false`
 - `fall marker` 中 `io_mem_path=false`
 
+## 10. 统一运行时配置工作流更新（2026-04-29）
+
+随着 `AppRuntimeConfig` 和独立 `health-config-ui` 落地，后续板端推荐流程不再是先 `export` 一长串环境变量，而是：
+
+1. 编辑 `config/runtime_config.json`，或运行 `./scripts/config.sh`
+2. 使用 `./scripts/start.sh` / `./scripts/start_all.sh`
+3. 只在 A/B 对比或临时排障时追加单次环境变量 override
+
+当前 0 拷贝板端推荐配置可以直接写成：
+
+```json
+{
+  "system": {
+    "runtime_mode": "system"
+  },
+  "video": {
+    "pipeline_backend": "inproc_gst",
+    "analysis_convert_backend": "rga"
+  },
+  "analysis": {
+    "transport": "dmabuf",
+    "rga_output_dmabuf": true,
+    "gst_dmabuf_input": true,
+    "gst_force_dmabuf_io": true,
+    "dma_heap": "/dev/dma_heap/system-uncached-dma32"
+  },
+  "fall_detection": {
+    "rknn_input_dmabuf": true
+  }
+}
+```
+
+如果只是想快速验证 override 优先级，推荐像下面这样做单次覆盖，而不是把调试变量长期写进 shell：
+
+```bash
+RK_VIDEO_ANALYSIS_TRANSPORT=dmabuf ./scripts/start.sh --backend-only
+```
+
 因此这次对比不是“环境变量变了但实际还是同一路径”，而是两组确实命中了不同实现分支。
 
 ### 9.3 板端结果

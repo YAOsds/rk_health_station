@@ -7,7 +7,8 @@ This project now uses a fixed deployment workflow:
 - cross-build on the Ubuntu host
 - assemble `rk3588_bundle/`
 - transfer the whole bundle directory to the RK3588 board
-- start it on the board with `./scripts/start.sh`
+- edit `config/runtime_config.json`, or launch `./scripts/config.sh`
+- start it on the board with `./scripts/start.sh` or `./scripts/start_all.sh`
 
 The verified SDK path used by the current repository is:
 
@@ -33,8 +34,11 @@ The bundle contains:
 
 - `bin/healthd`
 - `bin/health-ui`
+- `bin/health-config-ui`
 - `lib/`
 - `plugins/`
+- `config/runtime_config.json`
+- `scripts/config.sh`
 - `scripts/start.sh`
 - `scripts/stop.sh`
 - `scripts/status.sh`
@@ -71,6 +75,7 @@ scp -r rk_health_station/out/rk3588_bundle <rk_user>@<rk_ip>:/home/<rk_user>/
 ssh <rk_user>@<rk_ip> '
   cd /home/<rk_user>/rk3588_bundle &&
   chmod +x scripts/*.sh &&
+  ./scripts/config.sh &&
   ./scripts/start.sh
 '
 ```
@@ -81,6 +86,15 @@ Backend-only start:
 ssh <rk_user>@<rk_ip> '
   cd /home/<rk_user>/rk3588_bundle &&
   ./scripts/start.sh --backend-only
+'
+```
+
+Advanced one-shot override example:
+
+```bash
+ssh <rk_user>@<rk_ip> '
+  cd /home/<rk_user>/rk3588_bundle &&
+  RK_VIDEO_ANALYSIS_TRANSPORT=dmabuf ./scripts/start.sh --backend-only
 '
 ```
 
@@ -110,6 +124,7 @@ ssh <rk_user>@<rk_ip> '
 - pid files are written into `rk3588_bundle/run/`
 - database is written into `rk3588_bundle/data/healthd.sqlite`
 - local IPC socket defaults to `rk3588_bundle/run/rk_health_station.sock`
+- runtime JSON defaults live in `rk3588_bundle/config/runtime_config.json`
 - bundle start does not depend on systemd
 - if UI cannot open, first inspect `logs/health-ui.log`
 

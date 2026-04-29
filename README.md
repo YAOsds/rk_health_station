@@ -14,7 +14,8 @@
 - 目标架构 `ARM64 / aarch64`
 - 生成可直接传输到 RK3588 的 `rk3588_bundle/`
 - 通过 `scp` / `rsync` / `ssh` 将 bundle 传到板端
-- 在板端进入 bundle 目录后直接运行 `./scripts/start.sh`
+- 在板端进入 bundle 目录后先编辑 `config/runtime_config.json`，或运行 `./scripts/config.sh`
+- 然后使用 `./scripts/start.sh` 或 `./scripts/start_all.sh`
 
 当前仓库默认对接的交叉 SDK 路径为：
 
@@ -137,21 +138,31 @@ GstBuffer / raw frame
 -> fd descriptor 发给 health-falld
 ```
 
-这条路径不是默认打开的，需要显式设置运行开关。
+这条路径不是默认打开的，需要在 `config/runtime_config.json` 中显式打开；环境变量只建议作为临时 override。
 
 ### 推荐开关组合
 
-在 RK3588 板端推荐使用下面这组环境变量：
+在 RK3588 板端推荐直接把下面这些值写进 `config/runtime_config.json`：
 
-```bash
-export RK_RUNTIME_MODE=system
-export RK_VIDEO_PIPELINE_BACKEND=inproc_gst
-export RK_VIDEO_ANALYSIS_CONVERT_BACKEND=rga
-export RK_VIDEO_ANALYSIS_TRANSPORT=dmabuf
-export RK_VIDEO_RGA_OUTPUT_DMABUF=1
-export RK_VIDEO_GST_DMABUF_INPUT=1
-export RK_FALL_RKNN_INPUT_DMABUF=1
-export RK_VIDEO_ANALYSIS_DMA_HEAP=/dev/dma_heap/system-uncached-dma32
+```json
+{
+  "system": {
+    "runtime_mode": "system"
+  },
+  "video": {
+    "pipeline_backend": "inproc_gst",
+    "analysis_convert_backend": "rga"
+  },
+  "analysis": {
+    "transport": "dmabuf",
+    "rga_output_dmabuf": true,
+    "gst_dmabuf_input": true,
+    "dma_heap": "/dev/dma_heap/system-uncached-dma32"
+  },
+  "fall_detection": {
+    "rknn_input_dmabuf": true
+  }
+}
 ```
 
 含义：
@@ -178,7 +189,7 @@ export RK_VIDEO_ANALYSIS_DMA_HEAP=/dev/dma_heap/system-uncached-dma32
 ### 仍属实验/排查用途的开关
 
 ```bash
-export RK_VIDEO_GST_FORCE_DMABUF_IO=1
+RK_VIDEO_GST_FORCE_DMABUF_IO=1 ./scripts/start.sh --backend-only
 ```
 
 含义：
@@ -234,18 +245,16 @@ NV12/SystemMemory -> RGA -> RGB DMA fd
 ```bash
 cd /home/elf/rk3588_bundle
 
-export RK_RUNTIME_MODE=system
-export RK_VIDEO_PIPELINE_BACKEND=inproc_gst
-export RK_VIDEO_ANALYSIS_CONVERT_BACKEND=rga
-export RK_VIDEO_ANALYSIS_TRANSPORT=dmabuf
-export RK_VIDEO_RGA_OUTPUT_DMABUF=1
-export RK_VIDEO_GST_DMABUF_INPUT=1
-export RK_FALL_RKNN_INPUT_DMABUF=1
-export RK_VIDEO_ANALYSIS_DMA_HEAP=/dev/dma_heap/system-uncached-dma32
-
+./scripts/config.sh
 ./scripts/start.sh --backend-only
 printf '%s\n' '{"action":"start_preview","request_id":"dmabuf-readme","camera_id":"front_cam","payload":{}}' | \
   nc -q 1 -U /home/elf/rk3588_bundle/run/rk_video.sock
+```
+
+如需临时 A/B 覆盖某个开关，优先用单次命令覆盖，而不是长期修改 shell 环境。例如：
+
+```bash
+RK_VIDEO_ANALYSIS_TRANSPORT=dmabuf ./scripts/start.sh --backend-only
 ```
 
 ### 板端验证要点

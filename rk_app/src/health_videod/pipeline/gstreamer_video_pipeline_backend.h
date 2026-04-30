@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pipeline/video_pipeline_backend.h"
+#include "pipeline/preview_stream_reader.h"
 #include "debug/video_runtime_log_stats.h"
 #include "analysis/rga_frame_converter.h"
 #include "runtime_config/app_runtime_config.h"
@@ -84,9 +85,6 @@ private:
     bool startCommand(const QString &cameraId, const QString &command, bool recording,
         QString *previewUrl, QString *error, const VideoProfile &analysisInputProfile = VideoProfile(),
         AnalysisConvertBackend analysisConvertBackend = AnalysisConvertBackend::GstreamerCpu);
-    bool configurePreviewStream(
-        const QString &previewUrl, QString *host, quint16 *port, QString *boundary, QString *error) const;
-    bool readJpegFrameFromPreview(const QString &previewUrl, QByteArray *jpegBytes, QString *error) const;
     bool startRecordingProcess(
         const QString &cameraId, const QString &command, QString *error);
     bool stopRecordingProcess(const QString &cameraId, QString *error);
@@ -100,4 +98,5 @@ private:
     AnalysisFrameSource *analysisFrameSource_ = nullptr;
     AnalysisFrameConverter *analysisFrameConverter_ = nullptr;
     RgaFrameConverter defaultRgaFrameConverter_;
+    PreviewStreamReader previewStreamReader_;
 };

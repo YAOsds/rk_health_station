@@ -9,13 +9,9 @@
 #endif
 
 #include <QDateTime>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QProcess>
 #include <QProcessEnvironment>
-#include <QTcpSocket>
-#include <QUrl>
-#include <QUrlQuery>
 #include <linux/dma-heap.h>
 #include <signal.h>
 #include <fcntl.h>
@@ -38,88 +34,6 @@ const quint16 kAnalysisRingSlotCount = 32;
 const int kPreviewJpegQuality = 95;
 const char kDefaultGstLaunchBinary[] = "gst-launch-1.0";
 const char kDefaultAnalysisDmaHeap[] = "/dev/dma_heap/system-uncached-dma32";
-const int kPreviewFrameReadTimeoutMs = 5000;
-
-bool extractJpegFrameFromMultipartBuffer(
-    QByteArray *streamBuffer, const QByteArray &boundaryMarker, QByteArray *jpegBytes) {
-    if (!streamBuffer || !jpegBytes || boundaryMarker.isEmpty()) {
-        return false;
-    }
-
-    while (true) {
-        int boundaryIndex = streamBuffer->indexOf(boundaryMarker);
-        if (boundaryIndex < 0) {
-            return false;
-        }
-        if (boundaryIndex > 0) {
-            streamBuffer->remove(0, boundaryIndex);
-        }
-
-        int cursor = boundaryMarker.size();
-        if (streamBuffer->size() < cursor + 2) {
-            return false;
-        }
-        if (streamBuffer->mid(cursor, 2) == QByteArrayLiteral("--")) {
-            streamBuffer->remove(0, cursor + 2);
-            continue;
-        }
-        if (streamBuffer->mid(cursor, 2) != QByteArrayLiteral("\r\n")) {
-            streamBuffer->remove(0, cursor);
-            continue;
-        }
-        cursor += 2;
-
-        const int headerEnd = streamBuffer->indexOf(QByteArrayLiteral("\r\n\r\n"), cursor);
-        if (headerEnd < 0) {
-            return false;
-        }
-
-        const QList<QByteArray> headerLines
-            = streamBuffer->mid(cursor, headerEnd - cursor).split('\n');
-        QByteArray contentType;
-        int contentLength = -1;
-        for (QByteArray line : headerLines) {
-            line = line.trimmed();
-            const int separator = line.indexOf(':');
-            if (separator <= 0) {
-                continue;
-            }
-            const QByteArray key = line.left(separator).trimmed().toLower();
-            const QByteArray value = line.mid(separator + 1).trimmed();
-            if (key == QByteArrayLiteral("content-type")) {
-                contentType = value.toLower();
-            } else if (key == QByteArrayLiteral("content-length")) {
-                contentLength = value.toInt();
-            }
-        }
-
-        const int payloadStart = headerEnd + 4;
-        int consumed = payloadStart;
-        if (contentLength >= 0) {
-            if (streamBuffer->size() < payloadStart + contentLength) {
-                return false;
-            }
-            *jpegBytes = streamBuffer->mid(payloadStart, contentLength);
-            consumed = payloadStart + contentLength;
-            if (streamBuffer->mid(consumed, 2) == QByteArrayLiteral("\r\n")) {
-                consumed += 2;
-            }
-        } else {
-            const int nextBoundary = streamBuffer->indexOf(
-                QByteArrayLiteral("\r\n") + boundaryMarker, payloadStart);
-            if (nextBoundary < 0) {
-                return false;
-            }
-            *jpegBytes = streamBuffer->mid(payloadStart, nextBoundary - payloadStart);
-            consumed = nextBoundary + 2;
-        }
-
-        streamBuffer->remove(0, consumed);
-        return contentType.isEmpty() || contentType == QByteArrayLiteral("image/jpeg");
-    }
-}
-
-
 QString errnoMessage(const char *prefix) {
     return QStringLiteral("%1_%2_%3")
         .arg(QString::fromLatin1(prefix))
@@ -440,7 +354,7 @@ bool GstreamerVideoPipelineBackend::captureSnapshot(
     const VideoChannelStatus &status, const QString &outputPath, QString *error) {
     if (!status.previewUrl.isEmpty()) {
         QByteArray jpegBytes;
-        if (!readJpegFrameFromPreview(status.previewUrl, &jpegBytes, error)) {
+        if (!previewStreamReader_.readJpegFrame(status.previewUrl, &jpegBytes, error)) {
             return false;
         }
         QFile output(outputPath);
@@ -514,94 +428,6 @@ quint16 GstreamerVideoPipelineBackend::previewPortForCamera(const QString &camer
         return 5602;
     }
     return 5699;
-}
-
-bool GstreamerVideoPipelineBackend::configurePreviewStream(
-    const QString &previewUrl, QString *host, quint16 *port, QString *boundary, QString *error) const {
-    if (error) {
-        error->clear();
-    }
-
-    const QUrl parsedUrl(previewUrl);
-    if (!parsedUrl.isValid() || parsedUrl.scheme() != QStringLiteral("tcp") || parsedUrl.port() <= 0) {
-        if (error) {
-            *error = QStringLiteral("invalid_preview_url");
-        }
-        return false;
-    }
-
-    const QUrlQuery query(parsedUrl);
-    if (query.queryItemValue(QStringLiteral("transport")) != QStringLiteral("tcp_mjpeg")) {
-        if (error) {
-            *error = QStringLiteral("unsupported_preview_transport");
-        }
-        return false;
-    }
-
-    if (host) {
-        *host = parsedUrl.host().isEmpty() ? QStringLiteral("127.0.0.1") : parsedUrl.host();
-    }
-    if (port) {
-        *port = static_cast<quint16>(parsedUrl.port());
-    }
-    if (boundary) {
-        *boundary = query.queryItemValue(QStringLiteral("boundary"));
-        if (boundary->isEmpty()) {
-            *boundary = QStringLiteral("rkpreview");
-        }
-    }
-    return true;
-}
-
-bool GstreamerVideoPipelineBackend::readJpegFrameFromPreview(
-    const QString &previewUrl, QByteArray *jpegBytes, QString *error) const {
-    if (jpegBytes) {
-        jpegBytes->clear();
-    }
-
-    QString host;
-    QString boundary;
-    quint16 port = 0;
-    if (!configurePreviewStream(previewUrl, &host, &port, &boundary, error)) {
-        return false;
-    }
-
-    QTcpSocket socket;
-    socket.connectToHost(host, port);
-    if (!socket.waitForConnected(kPreviewFrameReadTimeoutMs)) {
-        if (error) {
-            *error = socket.errorString();
-        }
-        return false;
-    }
-
-    QByteArray buffer;
-    const QByteArray boundaryMarker = QByteArrayLiteral("--") + boundary.toUtf8();
-    QElapsedTimer timer;
-    timer.start();
-
-    while (timer.elapsed() < kPreviewFrameReadTimeoutMs) {
-        buffer.append(socket.readAll());
-        if (extractJpegFrameFromMultipartBuffer(&buffer, boundaryMarker, jpegBytes)) {
-            if (error) {
-                error->clear();
-            }
-            return true;
-        }
-
-        const int remainingMs = kPreviewFrameReadTimeoutMs - static_cast<int>(timer.elapsed());
-        if (remainingMs <= 0) {
-            break;
-        }
-        if (!socket.waitForReadyRead(remainingMs)) {
-            break;
-        }
-    }
-
-    if (error) {
-        *error = QStringLiteral("preview_frame_unavailable");
-    }
-    return false;
 }
 
 QString GstreamerVideoPipelineBackend::buildAnalysisTapCommandFragment(
@@ -772,10 +598,8 @@ QString GstreamerVideoPipelineBackend::buildSnapshotCommand(
 
 QString GstreamerVideoPipelineBackend::buildPreviewStreamRecordingCommand(
     const QString &previewUrl, const QString &outputPath, QString *error) const {
-    QString host;
-    QString boundary;
-    quint16 port = 0;
-    if (!configurePreviewStream(previewUrl, &host, &port, &boundary, error)) {
+    PreviewStreamReader::PreviewStreamConfig config;
+    if (!previewStreamReader_.parsePreviewUrl(previewUrl, &config, error)) {
         return QString();
     }
 
@@ -785,9 +609,9 @@ QString GstreamerVideoPipelineBackend::buildPreviewStreamRecordingCommand(
         "jpegparse ! jpegdec ! videoconvert ! "
         "mpph264enc ! h264parse ! qtmux ! filesink location=%5")
         .arg(shellQuote(gstLaunchBinary()))
-        .arg(shellQuote(host))
-        .arg(port)
-        .arg(boundary)
+        .arg(shellQuote(config.host))
+        .arg(config.port)
+        .arg(config.boundary)
         .arg(shellQuote(outputPath));
 }
 

@@ -28,6 +28,10 @@ add_executable(health-videod
     core/video_storage_service.h
     debug/video_runtime_log_stats.cpp
     debug/video_runtime_log_stats.h
+    pipeline/multipart_jpeg_parser.cpp
+    pipeline/multipart_jpeg_parser.h
+    pipeline/preview_stream_reader.cpp
+    pipeline/preview_stream_reader.h
     pipeline/gstreamer_video_pipeline_backend.cpp
     pipeline/gstreamer_video_pipeline_backend.h
     pipeline/video_pipeline_backend.h

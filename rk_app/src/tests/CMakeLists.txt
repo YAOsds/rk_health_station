@@ -641,6 +641,8 @@ endif()
 add_test(NAME ui_app_dashboard_refresh_test COMMAND ui_app_dashboard_refresh_test)
 
 set(VIDEO_PIPELINE_HELPER_SOURCES
+    ../health_videod/pipeline/dma_buffer_allocator.cpp
+    ../health_videod/pipeline/gst_command_builder.cpp
     ../health_videod/pipeline/multipart_jpeg_parser.cpp
     ../health_videod/pipeline/preview_stream_reader.cpp
 )

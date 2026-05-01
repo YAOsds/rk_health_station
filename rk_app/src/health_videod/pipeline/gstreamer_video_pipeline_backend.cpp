@@ -146,6 +146,7 @@ GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend()
 
 GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend(const AppRuntimeConfig &runtimeConfig)
     : runtimeConfig_(runtimeConfig)
+    , commandBuilder_(runtimeConfig)
     , defaultRgaFrameConverter_(runtimeConfig) {
 }
 
@@ -413,21 +414,15 @@ QString GstreamerVideoPipelineBackend::shellQuote(const QString &value) const {
 }
 
 QString GstreamerVideoPipelineBackend::previewUrlForCamera(const QString &cameraId) const {
-    return QStringLiteral("tcp://127.0.0.1:%1?transport=tcp_mjpeg&boundary=%2")
-        .arg(previewPortForCamera(cameraId))
-        .arg(previewBoundaryForCamera(cameraId));
+    return commandBuilder_.previewUrlForCamera(cameraId);
 }
 
 QString GstreamerVideoPipelineBackend::previewBoundaryForCamera(const QString &cameraId) const {
-    Q_UNUSED(cameraId);
-    return QStringLiteral("rkpreview");
+    return commandBuilder_.previewBoundaryForCamera(cameraId);
 }
 
 quint16 GstreamerVideoPipelineBackend::previewPortForCamera(const QString &cameraId) const {
-    if (cameraId == QStringLiteral("front_cam")) {
-        return 5602;
-    }
-    return 5699;
+    return commandBuilder_.previewPortForCamera(cameraId);
 }
 
 QString GstreamerVideoPipelineBackend::buildAnalysisTapCommandFragment(
@@ -487,132 +482,22 @@ bool GstreamerVideoPipelineBackend::analysisTapEnabled(const VideoChannelStatus 
 }
 
 QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelStatus &status) const {
-    const QString analysisTap = buildAnalysisTapCommandFragment(status, status.previewProfile);
-    if (status.inputMode == QStringLiteral("test_file")) {
-        if (!analysisTap.isEmpty()) {
-            return QStringLiteral(
-                "%1 -q -e filesrc location=%2 ! decodebin name=dec "
-                "dec. ! queue ! videoconvert ! videoscale ! "
-                "video/x-raw,format=NV12,width=%3,height=%4 ! tee name=t "
-                "t. ! queue ! mppjpegenc rc-mode=fixqp q-factor=%5 ! multipartmux boundary=%6 ! "
-                "tcpserversink host=127.0.0.1 port=%7%8 "
-                "dec. ! queue ! audioconvert ! audioresample ! fakesink sync=false")
-                .arg(shellQuote(gstLaunchBinary()))
-                .arg(shellQuote(status.testFilePath))
-                .arg(status.previewProfile.width)
-                .arg(status.previewProfile.height)
-                .arg(kPreviewJpegQuality)
-                .arg(previewBoundaryForCamera(status.cameraId))
-                .arg(previewPortForCamera(status.cameraId))
-                .arg(analysisTap);
-        }
-
-        return QStringLiteral(
-            "%1 -q -e filesrc location=%2 ! decodebin name=dec "
-            "dec. ! queue ! videoconvert ! videoscale ! "
-            "video/x-raw,format=NV12,width=%3,height=%4 ! mppjpegenc rc-mode=fixqp q-factor=%5 ! multipartmux boundary=%6 ! "
-            "tcpserversink host=127.0.0.1 port=%7 "
-            "dec. ! queue ! audioconvert ! audioresample ! fakesink sync=false")
-            .arg(shellQuote(gstLaunchBinary()))
-            .arg(shellQuote(status.testFilePath))
-            .arg(status.previewProfile.width)
-            .arg(status.previewProfile.height)
-            .arg(kPreviewJpegQuality)
-            .arg(previewBoundaryForCamera(status.cameraId))
-            .arg(previewPortForCamera(status.cameraId));
-    }
-
-    if (!analysisTap.isEmpty()) {
-        return QStringLiteral(
-            "%1 -q -e v4l2src device=%2 ! "
-            "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
-            "tee name=t "
-            "t. ! queue ! mppjpegenc rc-mode=fixqp q-factor=%7 ! multipartmux boundary=%8 ! "
-            "tcpserversink host=127.0.0.1 port=%9%10")
-            .arg(shellQuote(gstLaunchBinary()))
-            .arg(shellQuote(status.devicePath))
-            .arg(status.previewProfile.pixelFormat)
-            .arg(status.previewProfile.width)
-            .arg(status.previewProfile.height)
-            .arg(status.previewProfile.fps > 0 ? status.previewProfile.fps : 30)
-            .arg(kPreviewJpegQuality)
-            .arg(previewBoundaryForCamera(status.cameraId))
-            .arg(previewPortForCamera(status.cameraId))
-            .arg(analysisTap);
-    }
-
-    return QStringLiteral(
-        "%1 -q -e v4l2src device=%2 ! "
-        "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
-        "mppjpegenc rc-mode=fixqp q-factor=%7 ! multipartmux boundary=%8 ! "
-        "tcpserversink host=127.0.0.1 port=%9")
-        .arg(shellQuote(gstLaunchBinary()))
-        .arg(shellQuote(status.devicePath))
-        .arg(status.previewProfile.pixelFormat)
-        .arg(status.previewProfile.width)
-        .arg(status.previewProfile.height)
-        .arg(status.previewProfile.fps > 0 ? status.previewProfile.fps : 30)
-        .arg(kPreviewJpegQuality)
-        .arg(previewBoundaryForCamera(status.cameraId))
-        .arg(previewPortForCamera(status.cameraId));
+    return commandBuilder_.buildPreviewCommand(status, analysisTapEnabled(status));
 }
 
 QString GstreamerVideoPipelineBackend::buildRecordingCommand(
     const VideoChannelStatus &status, const QString &outputPath) const {
-    const QString analysisTap = buildAnalysisTapCommandFragment(status, status.recordProfile);
-    return QStringLiteral(
-        "%1 -q -e v4l2src device=%2 ! "
-        "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
-        "tee name=t "
-        "t. ! queue ! videoscale ! video/x-raw,format=NV12,width=%7,height=%8 ! "
-        "mppjpegenc rc-mode=fixqp q-factor=%9 ! multipartmux boundary=%10 ! "
-        "tcpserversink host=127.0.0.1 port=%11%12 "
-        "t. ! queue ! mpph264enc ! h264parse ! qtmux ! filesink location=%13")
-        .arg(shellQuote(gstLaunchBinary()))
-        .arg(shellQuote(status.devicePath))
-        .arg(status.recordProfile.pixelFormat)
-        .arg(status.recordProfile.width)
-        .arg(status.recordProfile.height)
-        .arg(status.recordProfile.fps > 0 ? status.recordProfile.fps : 30)
-        .arg(status.previewProfile.width)
-        .arg(status.previewProfile.height)
-        .arg(kPreviewJpegQuality)
-        .arg(previewBoundaryForCamera(status.cameraId))
-        .arg(previewPortForCamera(status.cameraId))
-        .arg(analysisTap)
-        .arg(shellQuote(outputPath));
+    return commandBuilder_.buildRecordingCommand(status, outputPath, analysisTapEnabled(status));
 }
 
 QString GstreamerVideoPipelineBackend::buildSnapshotCommand(
     const VideoChannelStatus &status, const QString &outputPath) const {
-    return QStringLiteral(
-        "%1 -q -e v4l2src device=%2 num-buffers=1 ! "
-        "video/x-raw,format=%3,width=%4,height=%5 ! mppjpegenc ! filesink location=%6")
-        .arg(shellQuote(gstLaunchBinary()))
-        .arg(shellQuote(status.devicePath))
-        .arg(status.snapshotProfile.pixelFormat)
-        .arg(status.snapshotProfile.width)
-        .arg(status.snapshotProfile.height)
-        .arg(shellQuote(outputPath));
+    return commandBuilder_.buildSnapshotCommand(status, outputPath);
 }
 
 QString GstreamerVideoPipelineBackend::buildPreviewStreamRecordingCommand(
     const QString &previewUrl, const QString &outputPath, QString *error) const {
-    PreviewStreamReader::PreviewStreamConfig config;
-    if (!previewStreamReader_.parsePreviewUrl(previewUrl, &config, error)) {
-        return QString();
-    }
-
-    return QStringLiteral(
-        "%1 -q -e tcpclientsrc host=%2 port=%3 ! "
-        "\"multipart/x-mixed-replace,boundary=%4\" ! multipartdemux single-stream=true ! "
-        "jpegparse ! jpegdec ! videoconvert ! "
-        "mpph264enc ! h264parse ! qtmux ! filesink location=%5")
-        .arg(shellQuote(gstLaunchBinary()))
-        .arg(shellQuote(config.host))
-        .arg(config.port)
-        .arg(config.boundary)
-        .arg(shellQuote(outputPath));
+    return commandBuilder_.buildPreviewStreamRecordingCommand(previewUrl, outputPath, error);
 }
 
 void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraId) {
@@ -919,8 +804,8 @@ void GstreamerVideoPipelineBackend::processAnalysisFrameBytes(
             const QString dmaHeapPath = runtimeConfig_.analysis.dmaHeap.trimmed().isEmpty()
                 ? QString::fromLatin1(kDefaultAnalysisDmaHeap)
                 : runtimeConfig_.analysis.dmaHeap.trimmed();
-            const int dmaFd = allocateDmaHeapBuffer(dmaHeapPath, packet.payload.size(), &dmaError);
-            if (dmaFd >= 0 && writePayloadToDmaBuffer(dmaFd, packet.payload, &dmaError)) {
+            const int dmaFd = dmaBufferAllocator_.allocate(dmaHeapPath, packet.payload.size(), &dmaError);
+            if (dmaFd >= 0 && dmaBufferAllocator_.writePayload(dmaFd, packet.payload, &dmaError)) {
                 descriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
                 descriptor.dmaBufPlaneCount = 1;
                 descriptor.dmaBufOffset = 0;

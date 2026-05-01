@@ -1,3 +1,5 @@
+#include "pipeline/dma_buffer_allocator.h"
+#include "pipeline/gst_command_builder.h"
 #include "pipeline/multipart_jpeg_parser.h"
 #include "pipeline/preview_stream_reader.h"
 
@@ -9,6 +11,7 @@
 
 #include <future>
 #include <thread>
+#include <unistd.h>
 
 namespace {
 QByteArray buildMultipartFrame(const QByteArray &boundary, const QByteArray &jpegBytes) {
@@ -60,6 +63,11 @@ private slots:
     void ignoresNonJpegMultipartChunk();
     void rejectsInvalidPreviewUrl();
     void readsJpegFrameFromTcpMultipartPreview();
+    void buildsExternalPreviewCommandWithoutAnalysisTap();
+    void buildsExternalPreviewCommandWithRgaAnalysisTap();
+    void buildsPreviewStreamRecordingCommand();
+    void quotesShellArgumentsWithSingleQuotes();
+    void allocatesMemfdBufferWhenHeapPathIsMemfd();
 };
 
 void GstreamerPipelineComponentsTest::extractsSingleJpegFromMultipartPayload() {
@@ -134,6 +142,92 @@ void GstreamerPipelineComponentsTest::readsJpegFrameFromTcpMultipartPreview() {
     QVERIFY(error.isEmpty());
 
     serverThread.join();
+}
+
+void GstreamerPipelineComponentsTest::buildsExternalPreviewCommandWithoutAnalysisTap() {
+    AppRuntimeConfig config;
+    GstCommandBuilder builder(config);
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    status.previewProfile.fps = 30;
+    status.previewProfile.pixelFormat = QStringLiteral("NV12");
+
+    const QString command = builder.buildPreviewCommand(status, false);
+    QVERIFY(command.contains(QStringLiteral("v4l2src device='/dev/video11'")));
+    QVERIFY(command.contains(QStringLiteral("video/x-raw,format=NV12,width=640,height=480,framerate=30/1")));
+    QVERIFY(command.contains(QStringLiteral("mppjpegenc rc-mode=fixqp q-factor=95")));
+    QVERIFY(command.contains(QStringLiteral("multipartmux boundary=rkpreview")));
+    QVERIFY(command.contains(QStringLiteral("tcpserversink host=127.0.0.1 port=5602")));
+    QVERIFY(!command.contains(QStringLiteral("fdsink fd=1")));
+}
+
+void GstreamerPipelineComponentsTest::buildsExternalPreviewCommandWithRgaAnalysisTap() {
+    AppRuntimeConfig config;
+    config.video.analysisConvertBackend = QStringLiteral("rga");
+    GstCommandBuilder builder(config);
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.previewProfile.width = 640;
+    status.previewProfile.height = 480;
+    status.previewProfile.fps = 30;
+    status.previewProfile.pixelFormat = QStringLiteral("NV12");
+
+    const QString command = builder.buildPreviewCommand(status, true);
+    QVERIFY(command.contains(QStringLiteral("tee name=t")));
+    QVERIFY(command.contains(QStringLiteral("videorate drop-only=true")));
+    QVERIFY(command.contains(QStringLiteral("video/x-raw,format=NV12,width=640,height=480,framerate=15/1")));
+    QVERIFY(command.contains(QStringLiteral("fdsink fd=1 sync=false")));
+}
+
+void GstreamerPipelineComponentsTest::buildsPreviewStreamRecordingCommand() {
+    AppRuntimeConfig config;
+    GstCommandBuilder builder(config);
+    QString error;
+
+    const QString command = builder.buildPreviewStreamRecordingCommand(
+        QStringLiteral("tcp://127.0.0.1:5602?transport=tcp_mjpeg&boundary=rkpreview"),
+        QStringLiteral("/tmp/out.mp4"),
+        &error);
+
+    QVERIFY(error.isEmpty());
+    QVERIFY(command.contains(QStringLiteral("tcpclientsrc host='127.0.0.1' port=5602")));
+    QVERIFY(command.contains(QStringLiteral("\"multipart/x-mixed-replace,boundary=rkpreview\"")));
+    QVERIFY(command.contains(QStringLiteral("multipartdemux single-stream=true")));
+    QVERIFY(command.contains(QStringLiteral("filesink location='/tmp/out.mp4'")));
+}
+
+void GstreamerPipelineComponentsTest::quotesShellArgumentsWithSingleQuotes() {
+    AppRuntimeConfig config;
+    config.video.gstLaunchBin = QStringLiteral("/tmp/it's-gst");
+    GstCommandBuilder builder(config);
+
+    VideoChannelStatus status;
+    status.cameraId = QStringLiteral("front_cam");
+    status.devicePath = QStringLiteral("/dev/video11");
+    status.snapshotProfile.width = 1920;
+    status.snapshotProfile.height = 1080;
+    status.snapshotProfile.pixelFormat = QStringLiteral("NV12");
+
+    const QString command = builder.buildSnapshotCommand(
+        status, QStringLiteral("/tmp/it's-output.jpg"));
+    QVERIFY(command.contains(QStringLiteral("'/tmp/it'\\''s-gst'")));
+    QVERIFY(command.contains(QStringLiteral("'/tmp/it'\\''s-output.jpg'")));
+}
+
+void GstreamerPipelineComponentsTest::allocatesMemfdBufferWhenHeapPathIsMemfd() {
+    DmaBufferAllocator allocator;
+    QString error;
+
+    const int fd = allocator.allocate(QStringLiteral("memfd"), 4096, &error);
+    QVERIFY2(fd >= 0, qPrintable(error));
+    QVERIFY(error.isEmpty());
+    QVERIFY(::close(fd) == 0);
 }
 
 QTEST_MAIN(GstreamerPipelineComponentsTest)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "pipeline/dma_buffer_allocator.h"
+#include "pipeline/gst_command_builder.h"
 #include "pipeline/video_pipeline_backend.h"
 #include "pipeline/preview_stream_reader.h"
 #include "debug/video_runtime_log_stats.h"
@@ -98,5 +100,7 @@ private:
     AnalysisFrameSource *analysisFrameSource_ = nullptr;
     AnalysisFrameConverter *analysisFrameConverter_ = nullptr;
     RgaFrameConverter defaultRgaFrameConverter_;
+    GstCommandBuilder commandBuilder_;
+    DmaBufferAllocator dmaBufferAllocator_;
     PreviewStreamReader previewStreamReader_;
 };

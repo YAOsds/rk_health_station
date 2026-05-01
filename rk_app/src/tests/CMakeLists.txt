@@ -646,6 +646,7 @@ set(VIDEO_PIPELINE_HELPER_SOURCES
     ../health_videod/pipeline/external_gstreamer_runner.cpp
     ../health_videod/pipeline/gst_command_builder.cpp
     ../health_videod/pipeline/gst_process_runner.cpp
+    ../health_videod/pipeline/inprocess_launch_description_builder.cpp
     ../health_videod/pipeline/multipart_jpeg_parser.cpp
     ../health_videod/pipeline/pipeline_runner_factory.cpp
     ../health_videod/pipeline/preview_stream_reader.cpp
@@ -864,6 +865,10 @@ if(RKAPP_ENABLE_INPROCESS_GSTREAMER)
         gstreamer-allocators-1.0
     )
     target_sources(gstreamer_video_pipeline_backend_test PRIVATE
+        ../health_videod/pipeline/gst_appsink_frame_dispatcher.cpp
+        ../health_videod/pipeline/gst_appsink_frame_dispatcher.h
+        ../health_videod/pipeline/gst_bus_monitor.cpp
+        ../health_videod/pipeline/gst_bus_monitor.h
         ../health_videod/pipeline/inprocess_gstreamer_pipeline.cpp
         ../health_videod/pipeline/inprocess_gstreamer_pipeline.h
     )

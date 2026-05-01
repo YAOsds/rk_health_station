@@ -1,5 +1,7 @@
 #include "pipeline/dma_buffer_allocator.h"
 #include "pipeline/gst_command_builder.h"
+#include "pipeline/inprocess_gstreamer_pipeline.h"
+#include "pipeline/inprocess_launch_description_builder.h"
 #include "pipeline/multipart_jpeg_parser.h"
 #include "pipeline/preview_stream_reader.h"
 #include "pipeline/pipeline_session.h"
@@ -329,6 +331,8 @@ private slots:
     void publishesRgaDmaOutputWhenRequested();
     void publishesRgaDmaInputOutputWhenProvided();
     void rejectsRgaDmaInputOutputWhenConverterFails();
+    void buildsInprocessLaunchDescriptionWithRgbAnalysisBranch();
+    void buildsInprocessLaunchDescriptionWithDmabufIoMode();
 };
 
 void GstreamerPipelineComponentsTest::extractsSingleJpegFromMultipartPayload() {
@@ -672,6 +676,66 @@ void GstreamerPipelineComponentsTest::rejectsRgaDmaInputOutputWhenConverterFails
 
     delete session.frameRing;
     session.frameRing = nullptr;
+}
+
+void GstreamerPipelineComponentsTest::buildsInprocessLaunchDescriptionWithRgbAnalysisBranch() {
+    InprocessGstreamerPipeline::Config config;
+    config.status.cameraId = QStringLiteral("front_cam");
+    config.status.devicePath = QStringLiteral("/dev/video11");
+    config.status.previewProfile.width = 640;
+    config.status.previewProfile.height = 480;
+    config.status.previewProfile.fps = 30;
+    config.status.previewProfile.pixelFormat = QStringLiteral("NV12");
+    config.previewBoundary = QStringLiteral("rkpreview");
+    config.previewPort = 5602;
+    config.analysisEnabled = true;
+    config.rgaAnalysis = false;
+    config.analysisOutputWidth = 640;
+    config.analysisOutputHeight = 640;
+    config.analysisFps = 15;
+    config.jpegQuality = 95;
+
+    InprocessLaunchDescriptionBuilder builder;
+    const QString description = builder.build(config);
+
+    QVERIFY(description.contains(QStringLiteral("v4l2src device=\"/dev/video11\"")));
+    QVERIFY(description.contains(QStringLiteral("multipartmux boundary=rkpreview")));
+    QVERIFY(description.contains(QStringLiteral("tcpserversink host=127.0.0.1 port=5602")));
+    QVERIFY(description.contains(QStringLiteral("videoconvert")));
+    QVERIFY(description.contains(QStringLiteral("videoscale")));
+    QVERIFY(description.contains(QStringLiteral("video/x-raw,format=RGB,width=640,height=640,framerate=15/1")));
+    QVERIFY(description.contains(QStringLiteral("appsink name=analysis_sink")));
+}
+
+void GstreamerPipelineComponentsTest::buildsInprocessLaunchDescriptionWithDmabufIoMode() {
+    InprocessGstreamerPipeline::Config config;
+    config.status.cameraId = QStringLiteral("front_cam");
+    config.status.devicePath = QStringLiteral("/dev/video11");
+    config.status.previewProfile.width = 640;
+    config.status.previewProfile.height = 480;
+    config.status.previewProfile.fps = 30;
+    config.status.previewProfile.pixelFormat = QStringLiteral("NV12");
+    config.previewBoundary = QStringLiteral("rkpreview");
+    config.previewPort = 5602;
+    config.analysisEnabled = true;
+    config.rgaAnalysis = true;
+    config.analysisInputPixelFormat = QStringLiteral("UYVY");
+    config.analysisOutputWidth = 640;
+    config.analysisOutputHeight = 640;
+    config.analysisFps = 15;
+    config.jpegQuality = 95;
+    config.preferDmaInput = true;
+    config.forceDmaIo = true;
+
+    InprocessLaunchDescriptionBuilder builder;
+    const QString description = builder.build(config);
+
+    QVERIFY(description.contains(QStringLiteral("v4l2src device=\"/dev/video11\" io-mode=dmabuf")));
+    QVERIFY(description.contains(QStringLiteral("video/x-raw,format=UYVY,width=640,height=480,framerate=30/1")));
+    QVERIFY(description.contains(QStringLiteral("video/x-raw,format=UYVY,width=640,height=480,framerate=15/1")));
+    QVERIFY(!description.contains(QStringLiteral("videoconvert")));
+    QVERIFY(!description.contains(QStringLiteral("videoscale")));
+    QVERIFY(description.contains(QStringLiteral("appsink name=analysis_sink")));
 }
 
 QTEST_MAIN(GstreamerPipelineComponentsTest)

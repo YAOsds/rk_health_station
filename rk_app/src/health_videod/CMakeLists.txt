@@ -38,6 +38,8 @@ add_executable(health-videod
     pipeline/gst_command_builder.h
     pipeline/gst_process_runner.cpp
     pipeline/gst_process_runner.h
+    pipeline/inprocess_launch_description_builder.cpp
+    pipeline/inprocess_launch_description_builder.h
     pipeline/multipart_jpeg_parser.cpp
     pipeline/multipart_jpeg_parser.h
     pipeline/pipeline_runner_factory.cpp
@@ -88,6 +90,10 @@ if(RKAPP_ENABLE_INPROCESS_GSTREAMER)
         gstreamer-allocators-1.0
     )
     target_sources(health-videod PRIVATE
+        pipeline/gst_appsink_frame_dispatcher.cpp
+        pipeline/gst_appsink_frame_dispatcher.h
+        pipeline/gst_bus_monitor.cpp
+        pipeline/gst_bus_monitor.h
         pipeline/inprocess_gstreamer_pipeline.cpp
         pipeline/inprocess_gstreamer_pipeline.h
     )

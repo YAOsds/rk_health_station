@@ -9,8 +9,11 @@
 
 #include <functional>
 
-#include <gst/app/gstappsink.h>
-#include <gst/gst.h>
+struct _GstElement;
+using GstElement = _GstElement;
+
+class GstBusMonitor;
+class GstAppSinkFrameDispatcher;
 
 class InprocessGstreamerPipeline : public QObject {
     Q_OBJECT
@@ -46,13 +49,7 @@ public:
     void stop();
 
 private:
-    static GstFlowReturn onNewSample(GstAppSink *sink, gpointer userData);
-
-    QString buildLaunchDescription(const Config &config) const;
     void installAllocationProbe();
-    void pollBus();
-    bool dispatchDmaFrame(GstSample *sample);
-    void dispatchFrame(GstSample *sample);
     void reportRuntimeError(const QString &error);
 
     GstElement *pipeline_ = nullptr;
@@ -61,7 +58,7 @@ private:
     DmaFrameCallback dmaFrameCallback_;
     bool preferDmaInput_ = false;
     int fallbackStrideBytes_ = 0;
-    bool loggedDmaInputAvailable_ = false;
-    bool loggedDmaInputUnavailable_ = false;
     RuntimeErrorCallback runtimeErrorCallback_;
+    GstBusMonitor *busMonitor_ = nullptr;
+    GstAppSinkFrameDispatcher *frameDispatcher_ = nullptr;
 };

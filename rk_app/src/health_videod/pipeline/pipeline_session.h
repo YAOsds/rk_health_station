@@ -9,6 +9,7 @@
 class QProcess;
 class SharedMemoryFrameRingWriter;
 class InprocessGstreamerPipeline;
+class VideoPipelineRunner;
 
 enum class AnalysisConvertBackend {
     GstreamerCpu,
@@ -18,6 +19,7 @@ enum class AnalysisConvertBackend {
 struct PipelineSession {
     QProcess *process = nullptr;
     QProcess *recordingProcess = nullptr;
+    VideoPipelineRunner *previewRunner = nullptr;
 #if defined(RKAPP_ENABLE_INPROCESS_GSTREAMER) && RKAPP_ENABLE_INPROCESS_GSTREAMER
     InprocessGstreamerPipeline *inprocessPipeline = nullptr;
 #endif

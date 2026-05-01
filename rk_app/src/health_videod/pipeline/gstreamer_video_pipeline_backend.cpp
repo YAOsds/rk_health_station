@@ -2,6 +2,8 @@
 
 #include "analysis/analysis_output_backend.h"
 #include "analysis/shared_memory_frame_ring.h"
+#include "pipeline/pipeline_runner_factory.h"
+#include "pipeline/video_pipeline_runner.h"
 #include "runtime_config/app_runtime_config_loader.h"
 #if defined(RKAPP_ENABLE_INPROCESS_GSTREAMER) && RKAPP_ENABLE_INPROCESS_GSTREAMER
 #include "pipeline/inprocess_gstreamer_pipeline.h"
@@ -470,14 +472,12 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
         return false;
     }
 
-    auto *process = new QProcess();
-    process->setProgram(QStringLiteral("/bin/bash"));
-    process->setArguments({QStringLiteral("-lc"), QStringLiteral("exec %1").arg(command)});
-    process->setProcessChannelMode(QProcess::SeparateChannels);
-    QObject::connect(process,
-        QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-        [this, cameraId, process](int exitCode, QProcess::ExitStatus exitStatus) {
-            if (!pipelines_.contains(cameraId) || pipelines_.value(cameraId).process != process) {
+    const GstProcessRunner::Callbacks callbacks{
+        [this, cameraId]() {
+            processAnalysisStdout(cameraId);
+        },
+        [this, cameraId](int exitCode, QProcess::ExitStatus exitStatus) {
+            if (!pipelines_.contains(cameraId)) {
                 return;
             }
 
@@ -496,7 +496,9 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
                 delete pipeline.recordingProcess;
             }
             delete pipeline.frameRing;
-            delete process;
+            if (pipeline.previewRunner) {
+                pipeline.previewRunner->deleteLater();
+            }
 
             if (!observer_) {
                 return;
@@ -515,32 +517,10 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
                            .arg(QStringLiteral("preview_pipeline_failed"));
                 observer_->onPipelineRuntimeError(cameraId, QStringLiteral("preview_pipeline_failed"));
             }
-        });
-    QObject::connect(process, &QProcess::readyReadStandardOutput, [this, cameraId]() {
-        processAnalysisStdout(cameraId);
-    });
-
-    process->start();
-    if (!process->waitForStarted(kStartTimeoutMs)) {
-        if (error) {
-            *error = process->errorString();
-        }
-        delete process;
-        return false;
-    }
-    if (process->waitForFinished(kStartupProbeMs)) {
-        if (error) {
-            const QString startupOutput = QString::fromUtf8(process->readAllStandardError()).trimmed();
-            *error = startupOutput.isEmpty()
-                ? QStringLiteral("pipeline_exited_during_startup")
-                : startupOutput;
-        }
-        delete process;
-        return false;
-    }
+        },
+    };
 
     PipelineSession pipeline;
-    pipeline.process = process;
     pipeline.recording = recording;
     pipeline.testInput = command.contains(QStringLiteral("filesrc location="));
     pipeline.previewUrl = previewUrlForCamera(cameraId);
@@ -573,13 +553,18 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
                 *error = finalError;
             }
             delete pipeline.frameRing;
-            process->kill();
-            process->waitForFinished(kStopTimeoutMs);
-            delete process;
             return false;
         }
     }
+    pipeline.previewRunner = PipelineRunnerFactory(runtimeConfig_).createPreviewRunner(
+        command, QProcess::SeparateChannels, callbacks);
     pipelines_.insert(cameraId, pipeline);
+    if (!pipelines_[cameraId].previewRunner->startPreview(pipelines_[cameraId], error)) {
+        PipelineSession failedPipeline = pipelines_.take(cameraId);
+        delete failedPipeline.frameRing;
+        delete failedPipeline.previewRunner;
+        return false;
+    }
     processAnalysisStdout(cameraId);
 
     qInfo().noquote()
@@ -759,26 +744,16 @@ bool GstreamerVideoPipelineBackend::stopActivePipeline(const QString &cameraId, 
         return true;
     }
 #endif
-    if (!pipeline.process) {
+    if (!pipeline.previewRunner) {
         delete pipeline.frameRing;
         return true;
     }
 
-    const qint64 processId = pipeline.process->processId();
-    if (processId > 0) {
-        ::kill(static_cast<pid_t>(processId), SIGINT);
-    }
-    if (!pipeline.process->waitForFinished(kStopTimeoutMs)) {
-        pipeline.process->kill();
-        pipeline.process->waitForFinished(kStopTimeoutMs);
-    }
-    if (pipeline.process->state() != QProcess::NotRunning && error) {
-        *error = QStringLiteral("pipeline_stop_failed");
-    }
+    pipeline.previewRunner->stopPreview(pipeline, error);
     qInfo().noquote()
         << QStringLiteral("video_runtime camera=%1 event=preview_stopped").arg(cameraId);
     delete pipeline.frameRing;
-    delete pipeline.process;
+    delete pipeline.previewRunner;
     return error ? error->isEmpty() : true;
 }
 

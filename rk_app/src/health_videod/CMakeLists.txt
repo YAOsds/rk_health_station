@@ -32,13 +32,20 @@ add_executable(health-videod
     pipeline/analysis_frame_publisher.h
     pipeline/dma_buffer_allocator.cpp
     pipeline/dma_buffer_allocator.h
+    pipeline/external_gstreamer_runner.cpp
+    pipeline/external_gstreamer_runner.h
     pipeline/gst_command_builder.cpp
     pipeline/gst_command_builder.h
+    pipeline/gst_process_runner.cpp
+    pipeline/gst_process_runner.h
     pipeline/multipart_jpeg_parser.cpp
     pipeline/multipart_jpeg_parser.h
+    pipeline/pipeline_runner_factory.cpp
+    pipeline/pipeline_runner_factory.h
     pipeline/pipeline_session.h
     pipeline/preview_stream_reader.cpp
     pipeline/preview_stream_reader.h
+    pipeline/video_pipeline_runner.h
     pipeline/gstreamer_video_pipeline_backend.cpp
     pipeline/gstreamer_video_pipeline_backend.h
     pipeline/video_pipeline_backend.h

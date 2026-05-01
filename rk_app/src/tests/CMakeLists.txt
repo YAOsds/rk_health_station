@@ -643,8 +643,11 @@ add_test(NAME ui_app_dashboard_refresh_test COMMAND ui_app_dashboard_refresh_tes
 set(VIDEO_PIPELINE_HELPER_SOURCES
     ../health_videod/pipeline/analysis_frame_publisher.cpp
     ../health_videod/pipeline/dma_buffer_allocator.cpp
+    ../health_videod/pipeline/external_gstreamer_runner.cpp
     ../health_videod/pipeline/gst_command_builder.cpp
+    ../health_videod/pipeline/gst_process_runner.cpp
     ../health_videod/pipeline/multipart_jpeg_parser.cpp
+    ../health_videod/pipeline/pipeline_runner_factory.cpp
     ../health_videod/pipeline/preview_stream_reader.cpp
 )
 
@@ -803,6 +806,26 @@ target_link_libraries(gstreamer_pipeline_components_test PRIVATE
 )
 
 add_test(NAME gstreamer_pipeline_components_test COMMAND gstreamer_pipeline_components_test)
+
+add_executable(gst_process_runner_test
+    video_daemon_tests/gst_process_runner_test.cpp
+    ../health_videod/pipeline/gst_process_runner.cpp
+)
+
+set_target_properties(gst_process_runner_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(gst_process_runner_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
+)
+
+target_link_libraries(gst_process_runner_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME gst_process_runner_test COMMAND gst_process_runner_test)
 
 add_executable(gstreamer_video_pipeline_backend_test
     video_daemon_tests/gstreamer_video_pipeline_backend_test.cpp

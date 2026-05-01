@@ -1,10 +1,11 @@
 #pragma once
 
+#include "pipeline/analysis_frame_publisher.h"
 #include "pipeline/dma_buffer_allocator.h"
 #include "pipeline/gst_command_builder.h"
+#include "pipeline/pipeline_session.h"
 #include "pipeline/video_pipeline_backend.h"
 #include "pipeline/preview_stream_reader.h"
-#include "debug/video_runtime_log_stats.h"
 #include "analysis/rga_frame_converter.h"
 #include "runtime_config/app_runtime_config.h"
 
@@ -33,35 +34,6 @@ public:
 
 private:
     friend class GstreamerVideoPipelineBackendTest;
-
-    enum class AnalysisConvertBackend {
-        GstreamerCpu,
-        Rga,
-    };
-
-    struct ActivePipeline {
-        QProcess *process = nullptr;
-        QProcess *recordingProcess = nullptr;
-#if defined(RKAPP_ENABLE_INPROCESS_GSTREAMER) && RKAPP_ENABLE_INPROCESS_GSTREAMER
-        InprocessGstreamerPipeline *inprocessPipeline = nullptr;
-#endif
-        bool recording = false;
-        bool testInput = false;
-        QString previewUrl;
-        QString cameraId;
-        AnalysisConvertBackend analysisConvertBackend = AnalysisConvertBackend::GstreamerCpu;
-        AnalysisFrameInputFormat analysisInputFormat = AnalysisFrameInputFormat::Nv12;
-        int analysisInputWidth = 0;
-        int analysisInputHeight = 0;
-        int analysisInputFrameBytes = 0;
-        int analysisOutputWidth = 0;
-        int analysisOutputHeight = 0;
-        int analysisOutputFrameBytes = 0;
-        quint64 nextFrameId = 1;
-        QByteArray stdoutBuffer;
-        SharedMemoryFrameRingWriter *frameRing = nullptr;
-        VideoRuntimeLogStats logStats;
-    };
 
     QString gstLaunchBinary() const;
     QString shellQuote(const QString &value) const;
@@ -94,7 +66,7 @@ private:
     bool stopActivePipeline(const QString &cameraId, QString *error);
     void stopAllPipelines();
 
-    QHash<QString, ActivePipeline> pipelines_;
+    QHash<QString, PipelineSession> pipelines_;
     AppRuntimeConfig runtimeConfig_;
     VideoPipelineObserver *observer_ = nullptr;
     AnalysisFrameSource *analysisFrameSource_ = nullptr;
@@ -103,4 +75,5 @@ private:
     GstCommandBuilder commandBuilder_;
     DmaBufferAllocator dmaBufferAllocator_;
     PreviewStreamReader previewStreamReader_;
+    AnalysisFramePublisher analysisFramePublisher_;
 };

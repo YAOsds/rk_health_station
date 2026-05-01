@@ -641,6 +641,7 @@ endif()
 add_test(NAME ui_app_dashboard_refresh_test COMMAND ui_app_dashboard_refresh_test)
 
 set(VIDEO_PIPELINE_HELPER_SOURCES
+    ../health_videod/pipeline/analysis_frame_publisher.cpp
     ../health_videod/pipeline/dma_buffer_allocator.cpp
     ../health_videod/pipeline/gst_command_builder.cpp
     ../health_videod/pipeline/multipart_jpeg_parser.cpp
@@ -782,6 +783,8 @@ add_test(NAME video_runtime_log_stats_test COMMAND video_runtime_log_stats_test)
 add_executable(gstreamer_pipeline_components_test
     video_daemon_tests/gstreamer_pipeline_components_test.cpp
     ${VIDEO_PIPELINE_HELPER_SOURCES}
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
 )
 
 set_target_properties(gstreamer_pipeline_components_test PROPERTIES

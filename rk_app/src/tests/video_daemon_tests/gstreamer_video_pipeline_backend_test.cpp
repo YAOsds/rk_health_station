@@ -295,8 +295,6 @@ private slots:
     void usesRgaAnalysisTapWhenRequested();
     void convertsRgaNv12FramesToRgbDescriptors();
     void publishesRgaDmaOutputWhenRequested();
-    void publishesRgaDmaInputOutputWhenProvided();
-    void rejectsRgaDmaInputOutputWhenConverterFails();
     void selectsUyvyInputFormatForGstDmabufPath();
     void selectsUyvyInputFormatForConfigDrivenGstDmabufPath();
     void computesStrideBytesForPackedUyvyInput();
@@ -861,106 +859,6 @@ void GstreamerVideoPipelineBackendTest::publishesRgaDmaOutputWhenRequested() {
     qunsetenv("RK_VIDEO_GST_LAUNCH_BIN");
 }
 
-void GstreamerVideoPipelineBackendTest::publishesRgaDmaInputOutputWhenProvided() {
-    qputenv("RK_VIDEO_RGA_OUTPUT_DMABUF", "1");
-
-    RecordingAnalysisFrameSource analysisSource;
-    analysisSource.dmabufSupported = true;
-    DmaInputOutputAnalysisFrameConverter converter;
-    GstreamerVideoPipelineBackend backend;
-    backend.setAnalysisFrameSource(&analysisSource);
-    backend.setAnalysisFrameConverter(&converter);
-
-    GstreamerVideoPipelineBackend::ActivePipeline pipeline;
-    pipeline.cameraId = QStringLiteral("front_cam");
-    pipeline.analysisConvertBackend = GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga;
-    pipeline.analysisInputWidth = 640;
-    pipeline.analysisInputHeight = 480;
-    pipeline.analysisInputFrameBytes = 640 * 480 * 3 / 2;
-    pipeline.analysisOutputWidth = 640;
-    pipeline.analysisOutputHeight = 640;
-    pipeline.analysisOutputFrameBytes = 640 * 640 * 3;
-    backend.pipelines_.insert(QStringLiteral("front_cam"), pipeline);
-
-    AnalysisDmaBuffer input;
-    input.fd = ::open("/dev/zero", O_RDONLY | O_CLOEXEC);
-    QVERIFY(input.fd >= 0);
-    input.payloadBytes = 640u * 480u * 3u / 2u;
-    input.offset = 0;
-    input.strideBytes = 640;
-
-    QVERIFY(backend.processAnalysisFrameDma(QStringLiteral("front_cam"), input));
-    QVERIFY(::close(input.fd) == 0);
-
-    QCOMPARE(analysisSource.dmabufDescriptors.size(), 1);
-    QCOMPARE(analysisSource.descriptors.size(), 0);
-    QCOMPARE(converter.dmaInputCalls, 1);
-    QCOMPARE(converter.byteArrayCalls, 0);
-    QCOMPARE(converter.lastInputBytes, 640 * 480 * 3 / 2);
-    QCOMPARE(converter.lastInputStride, 640);
-    QCOMPARE(converter.lastSrcWidth, 640);
-    QCOMPARE(converter.lastSrcHeight, 480);
-    QCOMPARE(converter.lastDstWidth, 640);
-    QCOMPARE(converter.lastDstHeight, 640);
-    QVERIFY(analysisSource.lastDmaBufFdWasValid);
-
-    const AnalysisFrameDescriptor descriptor = analysisSource.dmabufDescriptors.first();
-    QCOMPARE(descriptor.payloadTransport, AnalysisPayloadTransport::DmaBuf);
-    QCOMPARE(descriptor.width, 640);
-    QCOMPARE(descriptor.height, 640);
-    QCOMPARE(descriptor.pixelFormat, AnalysisPixelFormat::Rgb);
-    QCOMPARE(descriptor.payloadBytes, 640u * 640u * 3u);
-    QCOMPARE(descriptor.dmaBufPlaneCount, 1u);
-    QCOMPARE(descriptor.dmaBufOffset, 0u);
-    QCOMPARE(descriptor.dmaBufStrideBytes, 640u * 3u);
-    QVERIFY(descriptor.posePreprocessed);
-    QCOMPARE(descriptor.poseYPad, 80);
-
-    backend.pipelines_.clear();
-    qunsetenv("RK_VIDEO_RGA_OUTPUT_DMABUF");
-}
-
-void GstreamerVideoPipelineBackendTest::rejectsRgaDmaInputOutputWhenConverterFails() {
-    qputenv("RK_VIDEO_RGA_OUTPUT_DMABUF", "1");
-
-    RecordingAnalysisFrameSource analysisSource;
-    analysisSource.dmabufSupported = true;
-    FailingDmaInputOutputAnalysisFrameConverter converter;
-    GstreamerVideoPipelineBackend backend;
-    backend.setAnalysisFrameSource(&analysisSource);
-    backend.setAnalysisFrameConverter(&converter);
-
-    GstreamerVideoPipelineBackend::ActivePipeline pipeline;
-    pipeline.cameraId = QStringLiteral("front_cam");
-    pipeline.analysisConvertBackend = GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga;
-    pipeline.analysisInputWidth = 640;
-    pipeline.analysisInputHeight = 480;
-    pipeline.analysisInputFrameBytes = 640 * 480 * 3 / 2;
-    pipeline.analysisOutputWidth = 640;
-    pipeline.analysisOutputHeight = 640;
-    pipeline.analysisOutputFrameBytes = 640 * 640 * 3;
-    backend.pipelines_.insert(QStringLiteral("front_cam"), pipeline);
-
-    AnalysisDmaBuffer input;
-    input.fd = ::open("/dev/zero", O_RDONLY | O_CLOEXEC);
-    QVERIFY(input.fd >= 0);
-    input.payloadBytes = 640u * 480u * 3u / 2u;
-    input.offset = 0;
-    input.strideBytes = 640;
-
-    QVERIFY(!backend.processAnalysisFrameDma(QStringLiteral("front_cam"), input));
-    QVERIFY(::close(input.fd) == 0);
-
-    QCOMPARE(converter.dmaInputCalls, 1);
-    QCOMPARE(converter.byteArrayCalls, 0);
-    QCOMPARE(analysisSource.dmabufDescriptors.size(), 0);
-    QCOMPARE(analysisSource.descriptors.size(), 0);
-    QCOMPARE(backend.pipelines_[QStringLiteral("front_cam")].nextFrameId, 1ull);
-
-    backend.pipelines_.clear();
-    qunsetenv("RK_VIDEO_RGA_OUTPUT_DMABUF");
-}
-
 void GstreamerVideoPipelineBackendTest::selectsUyvyInputFormatForGstDmabufPath() {
     qputenv("RK_VIDEO_ANALYSIS_CONVERT_BACKEND", "rga");
     qputenv("RK_VIDEO_RGA_OUTPUT_DMABUF", "1");
@@ -968,25 +866,25 @@ void GstreamerVideoPipelineBackendTest::selectsUyvyInputFormatForGstDmabufPath()
 
     GstreamerVideoPipelineBackend backend;
     QCOMPARE(backend.inProcessAnalysisInputFormatForBackend(
-                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga),
+                 AnalysisConvertBackend::Rga),
         AnalysisFrameInputFormat::Nv12);
     QCOMPARE(backend.inProcessAnalysisInputFormatForBackend(
-                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::GstreamerCpu),
+                 AnalysisConvertBackend::GstreamerCpu),
         AnalysisFrameInputFormat::Nv12);
 
     qputenv("RK_VIDEO_GST_FORCE_DMABUF_IO", "1");
     GstreamerVideoPipelineBackend forceDmaIoBackend;
     QCOMPARE(forceDmaIoBackend.inProcessAnalysisInputFormatForBackend(
-                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga),
+                 AnalysisConvertBackend::Rga),
         AnalysisFrameInputFormat::Uyvy);
     QCOMPARE(forceDmaIoBackend.inProcessAnalysisInputFormatForBackend(
-                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::GstreamerCpu),
+                 AnalysisConvertBackend::GstreamerCpu),
         AnalysisFrameInputFormat::Nv12);
 
     qunsetenv("RK_VIDEO_GST_DMABUF_INPUT");
     GstreamerVideoPipelineBackend noDmaInputBackend;
     QCOMPARE(noDmaInputBackend.inProcessAnalysisInputFormatForBackend(
-                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga),
+                 AnalysisConvertBackend::Rga),
         AnalysisFrameInputFormat::Nv12);
 
     qunsetenv("RK_VIDEO_GST_FORCE_DMABUF_IO");
@@ -1003,10 +901,10 @@ void GstreamerVideoPipelineBackendTest::selectsUyvyInputFormatForConfigDrivenGst
 
     GstreamerVideoPipelineBackend backend(config);
     QCOMPARE(backend.inProcessAnalysisInputFormatForBackend(
-                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::Rga),
+                 AnalysisConvertBackend::Rga),
         AnalysisFrameInputFormat::Uyvy);
     QCOMPARE(backend.inProcessAnalysisInputFormatForBackend(
-                 GstreamerVideoPipelineBackend::AnalysisConvertBackend::GstreamerCpu),
+                 AnalysisConvertBackend::GstreamerCpu),
         AnalysisFrameInputFormat::Nv12);
 }
 

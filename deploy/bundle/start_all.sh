@@ -7,31 +7,50 @@ RUN_DIR="${BUNDLE_ROOT}/run"
 LOG_DIR="${BUNDLE_ROOT}/logs"
 
 detect_display_env() {
-  if [[ -n "${DISPLAY:-}" ]]; then
+  if display_usable "${DISPLAY:-}"; then
     return 0
   fi
+  unset DISPLAY
 
   if [[ -z "${XAUTHORITY:-}" && -f "${HOME}/.Xauthority" ]]; then
     export XAUTHORITY="${HOME}/.Xauthority"
   fi
 
   if [[ -n "${XAUTHORITY:-}" ]] && command -v xauth >/dev/null 2>&1; then
-    local detected_display
-    detected_display=$(xauth -f "${XAUTHORITY}" list 2>/dev/null \
-      | sed -n 's/.*unix:\([0-9][0-9]*\).*/:\1/p' | head -n1)
-    if [[ -n "${detected_display}" ]]; then
-      export DISPLAY="${detected_display}"
-    fi
+    while IFS= read -r detected_display; do
+      if display_usable "${detected_display}"; then
+        export DISPLAY="${detected_display}"
+        break
+      fi
+    done < <(xauth -f "${XAUTHORITY}" list 2>/dev/null \
+      | sed -n 's/.*unix:\([0-9][0-9]*\).*/:\1/p')
   fi
 
   if [[ -z "${DISPLAY:-}" ]] \
     && (pgrep -u "${USER}" Xorg >/dev/null 2>&1 || pgrep -x Xorg >/dev/null 2>&1); then
-    export DISPLAY=:0
+    for candidate in :0 :1; do
+      if display_usable "${candidate}"; then
+        export DISPLAY="${candidate}"
+        break
+      fi
+    done
   fi
 
   if [[ -n "${DISPLAY:-}" && -z "${QT_QPA_PLATFORM:-}" ]]; then
     export QT_QPA_PLATFORM=xcb
   fi
+}
+
+display_usable() {
+  local candidate=$1
+  [[ -n "${candidate}" ]] || return 1
+
+  if command -v xdpyinfo >/dev/null 2>&1; then
+    DISPLAY="${candidate}" XAUTHORITY="${XAUTHORITY:-}" xdpyinfo >/dev/null 2>&1
+    return $?
+  fi
+
+  return 0
 }
 
 check_pid_file_running() {

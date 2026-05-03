@@ -25,19 +25,21 @@ mkdir -p \
   "${TMP_ROOT}/logs" \
   "${TMP_ROOT}/run" \
   "${TMP_ROOT}/data" \
+  "${TMP_ROOT}/config" \
   "${TMP_ROOT}/assets/models" \
   "${TMP_ROOT}/model"
 
 cp "${SOURCE_BUNDLE_DIR}/start.sh" "${TMP_ROOT}/scripts/start.sh"
 cp "${SOURCE_BUNDLE_DIR}/stop.sh" "${TMP_ROOT}/scripts/stop.sh"
 cp "${SOURCE_BUNDLE_DIR}/status.sh" "${TMP_ROOT}/scripts/status.sh"
+cp "${PROJECT_ROOT}/deploy/config/runtime_config.json" "${TMP_ROOT}/config/runtime_config.json"
 chmod +x "${TMP_ROOT}/scripts/"*.sh
 
 cat > "${TMP_ROOT}/bin/healthd" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec python3 - "${RK_HEALTH_STATION_SOCKET_NAME:?}" <<'PY'
+exec python3 - "${PWD}/run/rk_health_station.sock" <<'PY'
 import os
 import socket
 import sys
@@ -60,7 +62,8 @@ cat > "${TMP_ROOT}/bin/health-videod" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec python3 - "${RK_VIDEO_ANALYSIS_SOCKET_PATH:?}" <<'PY'
+sleep "${HEALTH_VIDEOD_SOCKET_DELAY_SEC:-0}"
+exec python3 - "${PWD}/run/rk_video_analysis.sock" <<'PY'
 import os
 import socket
 import sys
@@ -110,33 +113,56 @@ wait_for_file() {
   return 1
 }
 
+assert_file_missing() {
+  local file=$1
+  if [[ -e "${file}" ]]; then
+    echo "unexpected file exists: ${file}" >&2
+    exit 1
+  fi
+}
+
+wait_for_socket() {
+  local path=$1
+  for _ in $(seq 1 50); do
+    if [[ -S "${path}" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+rm -f "${TMP_ROOT}/health-falld.env" "${TMP_ROOT}/run/"*.pid "${TMP_ROOT}/run/"*.sock
+
+(
+  FALLD_ENV_CAPTURE="${TMP_ROOT}/health-falld.env" \
+  HEALTH_VIDEOD_SOCKET_DELAY_SEC=2 \
+  RK_RUNTIME_MODE=system \
+  "${TMP_ROOT}/scripts/start.sh" --backend-only >/dev/null
+) &
+START_PID=$!
+
+sleep 0.5
+assert_file_missing "${TMP_ROOT}/health-falld.env"
+
+if ! wait_for_socket "${TMP_ROOT}/run/rk_video_analysis.sock"; then
+  echo "analysis socket was not created by health-videod" >&2
+  exit 1
+fi
+
+wait "${START_PID}"
+
 FALLD_ENV_CAPTURE="${TMP_ROOT}/health-falld.env" \
 RK_RUNTIME_MODE=system \
-"${TMP_ROOT}/scripts/start.sh" --backend-only >/dev/null
+"${TMP_ROOT}/scripts/status.sh" >/dev/null
 
 if ! wait_for_file "${TMP_ROOT}/health-falld.env"; then
   echo "health-falld was not started by start.sh" >&2
   exit 1
 fi
 
-grep -Fxq "RK_VIDEO_ANALYSIS_SOCKET_PATH=${TMP_ROOT}/run/rk_video_analysis.sock" "${TMP_ROOT}/health-falld.env" || {
-  echo "missing analysis socket env in health-falld.env" >&2
-  exit 1
-}
-grep -Fxq "RK_FALL_SOCKET_NAME=${TMP_ROOT}/run/rk_fall.sock" "${TMP_ROOT}/health-falld.env" || {
-  echo "missing fall socket env in health-falld.env" >&2
-  exit 1
-}
-grep -Fxq "RK_FALL_POSE_MODEL_PATH=${TMP_ROOT}/assets/models/yolov8n-pose.rknn" "${TMP_ROOT}/health-falld.env" || {
-  echo "missing pose model env in health-falld.env" >&2
-  exit 1
-}
-grep -Fxq "RK_FALL_ACTION_BACKEND=lstm_rknn" "${TMP_ROOT}/health-falld.env" || {
-  echo "missing action backend env in health-falld.env" >&2
-  exit 1
-}
-grep -Fxq "RK_FALL_LSTM_MODEL_PATH=${TMP_ROOT}/assets/models/lstm_fall.rknn" "${TMP_ROOT}/health-falld.env" || {
-  echo "missing lstm model env in health-falld.env" >&2
+grep -Fxq "RK_APP_CONFIG_PATH=${TMP_ROOT}/config/runtime_config.json" "${TMP_ROOT}/health-falld.env" || {
+  echo "missing runtime config env in health-falld.env" >&2
   exit 1
 }
 

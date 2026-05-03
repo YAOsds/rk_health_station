@@ -40,20 +40,39 @@ cat > "${TMP_ROOT}/bin/healthd" <<'INNER_EOF'
 set -euo pipefail
 
 env | sort > "${HEALTHD_ENV_CAPTURE:?}"
-exec python3 - "${PWD}/run/rk_health_station.sock" <<'PY'
+sleep "${HEALTHD_SOCKET_DELAY_SEC:-0}"
+exec python3 - "${RK_APP_CONFIG_PATH:?}" "${RK_HEALTH_STATION_SOCKET_NAME:-}" <<'PY'
+import json
 import os
 import socket
 import sys
 import time
+from pathlib import Path
 
-path = sys.argv[1]
+config_path = Path(sys.argv[1]).resolve()
+env_override = sys.argv[2].strip()
+
+if env_override:
+    path = Path(env_override)
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+else:
+    with config_path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    raw_path = data.get("ipc", {}).get("health_socket", "./run/rk_health_station.sock")
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = (config_path.parent / path).resolve()
+
+path.parent.mkdir(parents=True, exist_ok=True)
+
 try:
-    os.unlink(path)
+    os.unlink(str(path))
 except FileNotFoundError:
     pass
 
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-sock.bind(path)
+sock.bind(str(path))
 sock.listen(1)
 time.sleep(30)
 PY
@@ -94,6 +113,14 @@ assert_missing_prefix() {
   fi
 }
 
+assert_file_missing() {
+  local file=$1
+  if [[ -e "${file}" ]]; then
+    echo "unexpected file exists: ${file}" >&2
+    exit 1
+  fi
+}
+
 wait_for_file() {
   local file=$1
   for _ in $(seq 1 50); do
@@ -103,6 +130,18 @@ wait_for_file() {
     sleep 0.1
   done
   echo "timed out waiting for ${file}" >&2
+  exit 1
+}
+
+wait_for_socket() {
+  local path=$1
+  for _ in $(seq 1 50); do
+    if [[ -S "${path}" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "timed out waiting for socket ${path}" >&2
   exit 1
 }
 
@@ -127,6 +166,12 @@ write_runtime_config() {
 {
   "system": {
     "runtime_mode": "${runtime_mode}"
+  },
+  "ipc": {
+    "health_socket": "../run/rk_health_station.sock",
+    "video_socket": "../run/rk_video.sock",
+    "analysis_socket": "../run/rk_video_analysis.sock",
+    "fall_socket": "../run/rk_fall.sock"
   }
 }
 INNER_EOF
@@ -277,11 +322,41 @@ run_missing_relative_config_case() {
   assert_contains "${stderr_file}" "missing runtime config: ${caller_root}/missing/runtime_config.json"
 }
 
+run_waits_for_backend_socket_case() {
+  rm -f \
+    "${TMP_ROOT}/healthd.env" \
+    "${TMP_ROOT}/ui.env" \
+    "${TMP_ROOT}/run/"*.pid \
+    "${TMP_ROOT}/run/rk_health_station.sock"
+
+  unset RK_RUNTIME_MODE LD_LIBRARY_PATH QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH || true
+
+  (
+    HEALTHD_ENV_CAPTURE="${TMP_ROOT}/healthd.env" \
+    UI_ENV_CAPTURE="${TMP_ROOT}/ui.env" \
+    HEALTHD_SOCKET_DELAY_SEC=2 \
+    "${TMP_ROOT}/scripts/start.sh" >/dev/null
+  ) &
+  local start_pid=$!
+
+  sleep 0.5
+  assert_file_missing "${TMP_ROOT}/ui.env"
+
+  wait_for_socket "${TMP_ROOT}/run/rk_health_station.sock"
+  wait_for_file "${TMP_ROOT}/ui.env"
+  wait "${start_pid}"
+
+  HEALTHD_ENV_CAPTURE="${TMP_ROOT}/healthd.env" \
+  UI_ENV_CAPTURE="${TMP_ROOT}/ui.env" \
+  "${TMP_ROOT}/scripts/stop.sh" >/dev/null
+}
+
 run_case bundle
 run_case system
 write_runtime_config "${TMP_ROOT}/config/runtime_config.json" "auto"
 run_config_runtime_mode_case
 run_relative_config_path_case
 run_missing_relative_config_case
+run_waits_for_backend_socket_case
 
 echo "start_runtime_mode_test: PASS"

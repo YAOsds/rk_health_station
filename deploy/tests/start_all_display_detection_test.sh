@@ -52,6 +52,12 @@ EOF
 cat > "${TMP_ROOT}/bin/pgrep" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "-u" ]]; then
+  exit 0
+fi
+if [[ "${1:-}" == "-x" && "${2:-}" == "Xorg" ]]; then
+  exit 0
+fi
 exit 1
 EOF
 
@@ -61,8 +67,18 @@ set -euo pipefail
 echo "rkboard/unix:10  MIT-MAGIC-COOKIE-1  deadbeef"
 EOF
 
+cat > "${TMP_ROOT}/bin/xdpyinfo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${DISPLAY:-}" == ":1" ]]; then
+  exit 0
+fi
+echo "xdpyinfo: unable to open display ${DISPLAY:-}" >&2
+exit 1
+EOF
+
 chmod +x "${TMP_ROOT}/scripts/start.sh" "${TMP_ROOT}/scripts/status.sh" \
-  "${TMP_ROOT}/bin/pgrep" "${TMP_ROOT}/bin/xauth"
+  "${TMP_ROOT}/bin/pgrep" "${TMP_ROOT}/bin/xauth" "${TMP_ROOT}/bin/xdpyinfo"
 
 HOME="${TMP_ROOT}/home" \
 PATH="${TMP_ROOT}/bin:${PATH}" \
@@ -71,7 +87,7 @@ DISPLAY= \
 XAUTHORITY= \
 "${TMP_ROOT}/scripts/start_all.sh" >/dev/null
 
-grep -Fxq "DISPLAY=:10" "${TMP_ROOT}/captured.env"
+grep -Fxq "DISPLAY=:1" "${TMP_ROOT}/captured.env"
 grep -Fxq "XAUTHORITY=${TMP_ROOT}/home/.Xauthority" "${TMP_ROOT}/captured.env"
 grep -Fxq "QT_QPA_PLATFORM=xcb" "${TMP_ROOT}/captured.env"
 

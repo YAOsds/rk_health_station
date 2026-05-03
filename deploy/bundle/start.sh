@@ -35,6 +35,44 @@ read_runtime_mode_from_config() {
   tr -d '\r\n' < "${config_path}" | sed -n 's/.*"runtime_mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
+resolve_config_relative_path() {
+  local config_path=$1
+  local path=$2
+
+  if [[ -z "${path}" ]]; then
+    printf '%s\n' ""
+    return 0
+  fi
+
+  if [[ "${path}" == /* ]]; then
+    readlink -m -- "${path}"
+    return 0
+  fi
+
+  readlink -m -- "$(dirname "${config_path}")/${path}"
+}
+
+read_socket_path_from_config() {
+  local config_path=$1
+  local env_name=$2
+  local config_key=$3
+  local default_path=$4
+  local selected_path=""
+
+  if [[ -n "${!env_name:-}" ]]; then
+    selected_path="${!env_name}"
+  else
+    selected_path=$(tr -d '\r\n' < "${config_path}" \
+      | sed -n "s/.*\"${config_key}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p")
+  fi
+
+  if [[ -z "${selected_path}" ]]; then
+    selected_path="${default_path}"
+  fi
+
+  resolve_config_relative_path "${config_path}" "${selected_path}"
+}
+
 CONFIG_PATH=$(abspath_path "${RK_APP_CONFIG_PATH:-${BUNDLE_ROOT}/config/runtime_config.json}")
 RUNTIME_MODE=${RK_RUNTIME_MODE:-}
 
@@ -112,6 +150,17 @@ configure_runtime() {
 
 configure_runtime
 
+HEALTH_SOCKET_PATH=$(read_socket_path_from_config \
+  "${CONFIG_PATH}" \
+  "RK_HEALTH_STATION_SOCKET_NAME" \
+  "health_socket" \
+  "./run/rk_health_station.sock")
+ANALYSIS_SOCKET_PATH=$(read_socket_path_from_config \
+  "${CONFIG_PATH}" \
+  "RK_VIDEO_ANALYSIS_SOCKET_PATH" \
+  "analysis_socket" \
+  "./run/rk_video_analysis.sock")
+
 valid_pid() {
   local pid=$1
   [[ "${pid}" =~ ^[0-9]+$ ]] && (( pid > 0 ))
@@ -152,6 +201,28 @@ start_process() {
   echo "started ${name}, pid $(cat "${pid_file}")"
 }
 
+wait_for_socket() {
+  local socket_path=$1
+  local required_pid_file=$2
+  local description=$3
+  local attempts=50
+
+  while (( attempts > 0 )); do
+    if [[ -S "${socket_path}" ]]; then
+      return 0
+    fi
+    if ! is_running "${required_pid_file}"; then
+      echo "${description} producer exited early" >&2
+      return 1
+    fi
+    sleep 0.1
+    attempts=$((attempts - 1))
+  done
+
+  echo "socket not ready: ${socket_path}" >&2
+  return 1
+}
+
 if [[ ! -x "${HEALTHD_BIN}" ]]; then
   echo "missing backend binary: ${HEALTHD_BIN}" >&2
   exit 1
@@ -167,8 +238,10 @@ fi
 
 start_process "healthd" "${HEALTHD_BIN}" "${HEALTHD_PID_FILE}" "${HEALTHD_LOG}"
 start_process "health-videod" "${VIDEOD_BIN}" "${VIDEOD_PID_FILE}" "${VIDEOD_LOG}"
+wait_for_socket "${HEALTH_SOCKET_PATH}" "${HEALTHD_PID_FILE}" "healthd"
 
 if [[ -x "${FALLD_BIN}" ]]; then
+  wait_for_socket "${ANALYSIS_SOCKET_PATH}" "${VIDEOD_PID_FILE}" "health-videod"
   start_process "health-falld" "${FALLD_BIN}" "${FALLD_PID_FILE}" "${FALLD_LOG}"
 fi
 

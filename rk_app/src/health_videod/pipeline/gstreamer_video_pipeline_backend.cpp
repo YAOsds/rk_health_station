@@ -1,31 +1,20 @@
 #include "pipeline/gstreamer_video_pipeline_backend.h"
 
 #include "analysis/analysis_output_backend.h"
-#include "debug/latency_marker_writer.h"
 #include "analysis/shared_memory_frame_ring.h"
+#include "pipeline/pipeline_runner_factory.h"
+#include "pipeline/video_pipeline_runner.h"
 #include "runtime_config/app_runtime_config_loader.h"
 #if defined(RKAPP_ENABLE_INPROCESS_GSTREAMER) && RKAPP_ENABLE_INPROCESS_GSTREAMER
 #include "pipeline/inprocess_gstreamer_pipeline.h"
 #endif
 
-#include <QDateTime>
-#include <QElapsedTimer>
+#include <QDebug>
 #include <QFile>
 #include <QProcess>
 #include <QProcessEnvironment>
-#include <QTcpSocket>
-#include <QUrl>
-#include <QUrlQuery>
-#include <linux/dma-heap.h>
 #include <signal.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <sys/syscall.h>
 #include <unistd.h>
-
-#include <cerrno>
-#include <cstring>
 
 namespace {
 const int kStartTimeoutMs = 5000;
@@ -37,172 +26,6 @@ const int kAnalysisOutputHeight = 640;
 const quint16 kAnalysisRingSlotCount = 32;
 const int kPreviewJpegQuality = 95;
 const char kDefaultGstLaunchBinary[] = "gst-launch-1.0";
-const char kDefaultAnalysisDmaHeap[] = "/dev/dma_heap/system-uncached-dma32";
-const int kPreviewFrameReadTimeoutMs = 5000;
-
-bool extractJpegFrameFromMultipartBuffer(
-    QByteArray *streamBuffer, const QByteArray &boundaryMarker, QByteArray *jpegBytes) {
-    if (!streamBuffer || !jpegBytes || boundaryMarker.isEmpty()) {
-        return false;
-    }
-
-    while (true) {
-        int boundaryIndex = streamBuffer->indexOf(boundaryMarker);
-        if (boundaryIndex < 0) {
-            return false;
-        }
-        if (boundaryIndex > 0) {
-            streamBuffer->remove(0, boundaryIndex);
-        }
-
-        int cursor = boundaryMarker.size();
-        if (streamBuffer->size() < cursor + 2) {
-            return false;
-        }
-        if (streamBuffer->mid(cursor, 2) == QByteArrayLiteral("--")) {
-            streamBuffer->remove(0, cursor + 2);
-            continue;
-        }
-        if (streamBuffer->mid(cursor, 2) != QByteArrayLiteral("\r\n")) {
-            streamBuffer->remove(0, cursor);
-            continue;
-        }
-        cursor += 2;
-
-        const int headerEnd = streamBuffer->indexOf(QByteArrayLiteral("\r\n\r\n"), cursor);
-        if (headerEnd < 0) {
-            return false;
-        }
-
-        const QList<QByteArray> headerLines
-            = streamBuffer->mid(cursor, headerEnd - cursor).split('\n');
-        QByteArray contentType;
-        int contentLength = -1;
-        for (QByteArray line : headerLines) {
-            line = line.trimmed();
-            const int separator = line.indexOf(':');
-            if (separator <= 0) {
-                continue;
-            }
-            const QByteArray key = line.left(separator).trimmed().toLower();
-            const QByteArray value = line.mid(separator + 1).trimmed();
-            if (key == QByteArrayLiteral("content-type")) {
-                contentType = value.toLower();
-            } else if (key == QByteArrayLiteral("content-length")) {
-                contentLength = value.toInt();
-            }
-        }
-
-        const int payloadStart = headerEnd + 4;
-        int consumed = payloadStart;
-        if (contentLength >= 0) {
-            if (streamBuffer->size() < payloadStart + contentLength) {
-                return false;
-            }
-            *jpegBytes = streamBuffer->mid(payloadStart, contentLength);
-            consumed = payloadStart + contentLength;
-            if (streamBuffer->mid(consumed, 2) == QByteArrayLiteral("\r\n")) {
-                consumed += 2;
-            }
-        } else {
-            const int nextBoundary = streamBuffer->indexOf(
-                QByteArrayLiteral("\r\n") + boundaryMarker, payloadStart);
-            if (nextBoundary < 0) {
-                return false;
-            }
-            *jpegBytes = streamBuffer->mid(payloadStart, nextBoundary - payloadStart);
-            consumed = nextBoundary + 2;
-        }
-
-        streamBuffer->remove(0, consumed);
-        return contentType.isEmpty() || contentType == QByteArrayLiteral("image/jpeg");
-    }
-}
-
-
-QString errnoMessage(const char *prefix) {
-    return QStringLiteral("%1_%2_%3")
-        .arg(QString::fromLatin1(prefix))
-        .arg(errno)
-        .arg(QString::fromLocal8Bit(strerror(errno)));
-}
-
-int allocateMemFdBuffer(int bytes, QString *error) {
-#ifdef SYS_memfd_create
-    const int fd = static_cast<int>(::syscall(SYS_memfd_create, "rk_analysis_dmabuf", MFD_CLOEXEC));
-    if (fd < 0) {
-        if (error) {
-            *error = errnoMessage("analysis_memfd_create_failed");
-        }
-        return -1;
-    }
-    if (::ftruncate(fd, bytes) != 0) {
-        if (error) {
-            *error = errnoMessage("analysis_memfd_truncate_failed");
-        }
-        ::close(fd);
-        return -1;
-    }
-    if (error) {
-        error->clear();
-    }
-    return fd;
-#else
-    Q_UNUSED(bytes);
-    if (error) {
-        *error = QStringLiteral("analysis_memfd_unsupported");
-    }
-    return -1;
-#endif
-}
-
-int allocateDmaHeapBuffer(const QString &heapPath, int bytes, QString *error) {
-    if (heapPath == QStringLiteral("memfd")) {
-        return allocateMemFdBuffer(bytes, error);
-    }
-
-    const int heapFd = ::open(heapPath.toUtf8().constData(), O_RDWR | O_CLOEXEC);
-    if (heapFd < 0) {
-        if (error) {
-            *error = errnoMessage("analysis_dma_heap_open_failed");
-        }
-        return -1;
-    }
-
-    dma_heap_allocation_data allocation{};
-    allocation.len = static_cast<__u64>(bytes);
-    allocation.fd_flags = O_RDWR | O_CLOEXEC;
-    allocation.heap_flags = 0;
-    if (::ioctl(heapFd, DMA_HEAP_IOCTL_ALLOC, &allocation) != 0) {
-        if (error) {
-            *error = errnoMessage("analysis_dma_heap_alloc_failed");
-        }
-        ::close(heapFd);
-        return -1;
-    }
-
-    ::close(heapFd);
-    if (error) {
-        error->clear();
-    }
-    return static_cast<int>(allocation.fd);
-}
-
-bool writePayloadToDmaBuffer(int fd, const QByteArray &payload, QString *error) {
-    void *mapped = ::mmap(nullptr, static_cast<size_t>(payload.size()), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (mapped == MAP_FAILED) {
-        if (error) {
-            *error = errnoMessage("analysis_dmabuf_mmap_failed");
-        }
-        return false;
-    }
-    memcpy(mapped, payload.constData(), static_cast<size_t>(payload.size()));
-    ::munmap(mapped, static_cast<size_t>(payload.size()));
-    if (error) {
-        error->clear();
-    }
-    return true;
-}
 
 int nv12FrameBytes(int width, int height) {
     return width > 0 && height > 0 ? width * height * 3 / 2 : 0;
@@ -232,7 +55,12 @@ GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend()
 
 GstreamerVideoPipelineBackend::GstreamerVideoPipelineBackend(const AppRuntimeConfig &runtimeConfig)
     : runtimeConfig_(runtimeConfig)
-    , defaultRgaFrameConverter_(runtimeConfig) {
+    , defaultRgaFrameConverter_(runtimeConfig)
+    , commandBuilder_(runtimeConfig)
+    , analysisFramePublisher_(runtimeConfig, &dmaBufferAllocator_) {
+    analysisFramePublisher_.setFrameSource(analysisFrameSource_);
+    analysisFramePublisher_.setFrameConverter(analysisFrameConverter_);
+    analysisFramePublisher_.setFallbackFrameConverter(&defaultRgaFrameConverter_);
 }
 
 GstreamerVideoPipelineBackend::~GstreamerVideoPipelineBackend() {
@@ -245,10 +73,12 @@ void GstreamerVideoPipelineBackend::setObserver(VideoPipelineObserver *observer)
 
 void GstreamerVideoPipelineBackend::setAnalysisFrameSource(AnalysisFrameSource *source) {
     analysisFrameSource_ = source;
+    analysisFramePublisher_.setFrameSource(source);
 }
 
 void GstreamerVideoPipelineBackend::setAnalysisFrameConverter(AnalysisFrameConverter *converter) {
     analysisFrameConverter_ = converter;
+    analysisFramePublisher_.setFrameConverter(converter);
 }
 
 bool GstreamerVideoPipelineBackend::startPreview(
@@ -297,7 +127,7 @@ bool GstreamerVideoPipelineBackend::startInProcessPreview(
     const AnalysisConvertBackend backend = analysisConvertBackendForProfile(status.previewProfile);
     const AnalysisFrameInputFormat analysisInputFormat = inProcessAnalysisInputFormatForBackend(backend);
 
-    ActivePipeline pipeline;
+    PipelineSession pipeline;
     pipeline.recording = false;
     pipeline.testInput = status.inputMode == QStringLiteral("test_file");
     pipeline.previewUrl = previewUrlForCamera(status.cameraId);
@@ -377,7 +207,7 @@ bool GstreamerVideoPipelineBackend::startInProcessPreview(
     config.forceDmaIo = config.preferDmaInput && runtimeConfig_.analysis.gstForceDmabufIo;
 
     if (!inprocessPipeline->start(config, error)) {
-        ActivePipeline failedPipeline = pipelines_.take(status.cameraId);
+        PipelineSession failedPipeline = pipelines_.take(status.cameraId);
         delete failedPipeline.frameRing;
         delete failedPipeline.inprocessPipeline;
         if (previewUrl) {
@@ -440,7 +270,7 @@ bool GstreamerVideoPipelineBackend::captureSnapshot(
     const VideoChannelStatus &status, const QString &outputPath, QString *error) {
     if (!status.previewUrl.isEmpty()) {
         QByteArray jpegBytes;
-        if (!readJpegFrameFromPreview(status.previewUrl, &jpegBytes, error)) {
+        if (!previewStreamReader_.readJpegFrame(status.previewUrl, &jpegBytes, error)) {
             return false;
         }
         QFile output(outputPath);
@@ -499,109 +329,15 @@ QString GstreamerVideoPipelineBackend::shellQuote(const QString &value) const {
 }
 
 QString GstreamerVideoPipelineBackend::previewUrlForCamera(const QString &cameraId) const {
-    return QStringLiteral("tcp://127.0.0.1:%1?transport=tcp_mjpeg&boundary=%2")
-        .arg(previewPortForCamera(cameraId))
-        .arg(previewBoundaryForCamera(cameraId));
+    return commandBuilder_.previewUrlForCamera(cameraId);
 }
 
 QString GstreamerVideoPipelineBackend::previewBoundaryForCamera(const QString &cameraId) const {
-    Q_UNUSED(cameraId);
-    return QStringLiteral("rkpreview");
+    return commandBuilder_.previewBoundaryForCamera(cameraId);
 }
 
 quint16 GstreamerVideoPipelineBackend::previewPortForCamera(const QString &cameraId) const {
-    if (cameraId == QStringLiteral("front_cam")) {
-        return 5602;
-    }
-    return 5699;
-}
-
-bool GstreamerVideoPipelineBackend::configurePreviewStream(
-    const QString &previewUrl, QString *host, quint16 *port, QString *boundary, QString *error) const {
-    if (error) {
-        error->clear();
-    }
-
-    const QUrl parsedUrl(previewUrl);
-    if (!parsedUrl.isValid() || parsedUrl.scheme() != QStringLiteral("tcp") || parsedUrl.port() <= 0) {
-        if (error) {
-            *error = QStringLiteral("invalid_preview_url");
-        }
-        return false;
-    }
-
-    const QUrlQuery query(parsedUrl);
-    if (query.queryItemValue(QStringLiteral("transport")) != QStringLiteral("tcp_mjpeg")) {
-        if (error) {
-            *error = QStringLiteral("unsupported_preview_transport");
-        }
-        return false;
-    }
-
-    if (host) {
-        *host = parsedUrl.host().isEmpty() ? QStringLiteral("127.0.0.1") : parsedUrl.host();
-    }
-    if (port) {
-        *port = static_cast<quint16>(parsedUrl.port());
-    }
-    if (boundary) {
-        *boundary = query.queryItemValue(QStringLiteral("boundary"));
-        if (boundary->isEmpty()) {
-            *boundary = QStringLiteral("rkpreview");
-        }
-    }
-    return true;
-}
-
-bool GstreamerVideoPipelineBackend::readJpegFrameFromPreview(
-    const QString &previewUrl, QByteArray *jpegBytes, QString *error) const {
-    if (jpegBytes) {
-        jpegBytes->clear();
-    }
-
-    QString host;
-    QString boundary;
-    quint16 port = 0;
-    if (!configurePreviewStream(previewUrl, &host, &port, &boundary, error)) {
-        return false;
-    }
-
-    QTcpSocket socket;
-    socket.connectToHost(host, port);
-    if (!socket.waitForConnected(kPreviewFrameReadTimeoutMs)) {
-        if (error) {
-            *error = socket.errorString();
-        }
-        return false;
-    }
-
-    QByteArray buffer;
-    const QByteArray boundaryMarker = QByteArrayLiteral("--") + boundary.toUtf8();
-    QElapsedTimer timer;
-    timer.start();
-
-    while (timer.elapsed() < kPreviewFrameReadTimeoutMs) {
-        buffer.append(socket.readAll());
-        if (extractJpegFrameFromMultipartBuffer(&buffer, boundaryMarker, jpegBytes)) {
-            if (error) {
-                error->clear();
-            }
-            return true;
-        }
-
-        const int remainingMs = kPreviewFrameReadTimeoutMs - static_cast<int>(timer.elapsed());
-        if (remainingMs <= 0) {
-            break;
-        }
-        if (!socket.waitForReadyRead(remainingMs)) {
-            break;
-        }
-    }
-
-    if (error) {
-        *error = QStringLiteral("preview_frame_unavailable");
-    }
-    return false;
+    return commandBuilder_.previewPortForCamera(cameraId);
 }
 
 QString GstreamerVideoPipelineBackend::buildAnalysisTapCommandFragment(
@@ -636,7 +372,7 @@ QString GstreamerVideoPipelineBackend::buildAnalysisTapCommandFragment(
         .arg(analysisTapFps);
 }
 
-GstreamerVideoPipelineBackend::AnalysisConvertBackend
+AnalysisConvertBackend
 GstreamerVideoPipelineBackend::analysisConvertBackendForProfile(const VideoProfile &sourceProfile) const {
     const QString requested = runtimeConfig_.video.analysisConvertBackend.trimmed().toLower();
     if (requested == QStringLiteral("gstreamer_cpu") || requested == QStringLiteral("cpu")) {
@@ -661,134 +397,22 @@ bool GstreamerVideoPipelineBackend::analysisTapEnabled(const VideoChannelStatus 
 }
 
 QString GstreamerVideoPipelineBackend::buildPreviewCommand(const VideoChannelStatus &status) const {
-    const QString analysisTap = buildAnalysisTapCommandFragment(status, status.previewProfile);
-    if (status.inputMode == QStringLiteral("test_file")) {
-        if (!analysisTap.isEmpty()) {
-            return QStringLiteral(
-                "%1 -q -e filesrc location=%2 ! decodebin name=dec "
-                "dec. ! queue ! videoconvert ! videoscale ! "
-                "video/x-raw,format=NV12,width=%3,height=%4 ! tee name=t "
-                "t. ! queue ! mppjpegenc rc-mode=fixqp q-factor=%5 ! multipartmux boundary=%6 ! "
-                "tcpserversink host=127.0.0.1 port=%7%8 "
-                "dec. ! queue ! audioconvert ! audioresample ! fakesink sync=false")
-                .arg(shellQuote(gstLaunchBinary()))
-                .arg(shellQuote(status.testFilePath))
-                .arg(status.previewProfile.width)
-                .arg(status.previewProfile.height)
-                .arg(kPreviewJpegQuality)
-                .arg(previewBoundaryForCamera(status.cameraId))
-                .arg(previewPortForCamera(status.cameraId))
-                .arg(analysisTap);
-        }
-
-        return QStringLiteral(
-            "%1 -q -e filesrc location=%2 ! decodebin name=dec "
-            "dec. ! queue ! videoconvert ! videoscale ! "
-            "video/x-raw,format=NV12,width=%3,height=%4 ! mppjpegenc rc-mode=fixqp q-factor=%5 ! multipartmux boundary=%6 ! "
-            "tcpserversink host=127.0.0.1 port=%7 "
-            "dec. ! queue ! audioconvert ! audioresample ! fakesink sync=false")
-            .arg(shellQuote(gstLaunchBinary()))
-            .arg(shellQuote(status.testFilePath))
-            .arg(status.previewProfile.width)
-            .arg(status.previewProfile.height)
-            .arg(kPreviewJpegQuality)
-            .arg(previewBoundaryForCamera(status.cameraId))
-            .arg(previewPortForCamera(status.cameraId));
-    }
-
-    if (!analysisTap.isEmpty()) {
-        return QStringLiteral(
-            "%1 -q -e v4l2src device=%2 ! "
-            "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
-            "tee name=t "
-            "t. ! queue ! mppjpegenc rc-mode=fixqp q-factor=%7 ! multipartmux boundary=%8 ! "
-            "tcpserversink host=127.0.0.1 port=%9%10")
-            .arg(shellQuote(gstLaunchBinary()))
-            .arg(shellQuote(status.devicePath))
-            .arg(status.previewProfile.pixelFormat)
-            .arg(status.previewProfile.width)
-            .arg(status.previewProfile.height)
-            .arg(status.previewProfile.fps > 0 ? status.previewProfile.fps : 30)
-            .arg(kPreviewJpegQuality)
-            .arg(previewBoundaryForCamera(status.cameraId))
-            .arg(previewPortForCamera(status.cameraId))
-            .arg(analysisTap);
-    }
-
-    return QStringLiteral(
-        "%1 -q -e v4l2src device=%2 ! "
-        "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
-        "mppjpegenc rc-mode=fixqp q-factor=%7 ! multipartmux boundary=%8 ! "
-        "tcpserversink host=127.0.0.1 port=%9")
-        .arg(shellQuote(gstLaunchBinary()))
-        .arg(shellQuote(status.devicePath))
-        .arg(status.previewProfile.pixelFormat)
-        .arg(status.previewProfile.width)
-        .arg(status.previewProfile.height)
-        .arg(status.previewProfile.fps > 0 ? status.previewProfile.fps : 30)
-        .arg(kPreviewJpegQuality)
-        .arg(previewBoundaryForCamera(status.cameraId))
-        .arg(previewPortForCamera(status.cameraId));
+    return commandBuilder_.buildPreviewCommand(status, analysisTapEnabled(status));
 }
 
 QString GstreamerVideoPipelineBackend::buildRecordingCommand(
     const VideoChannelStatus &status, const QString &outputPath) const {
-    const QString analysisTap = buildAnalysisTapCommandFragment(status, status.recordProfile);
-    return QStringLiteral(
-        "%1 -q -e v4l2src device=%2 ! "
-        "video/x-raw,format=%3,width=%4,height=%5,framerate=%6/1 ! "
-        "tee name=t "
-        "t. ! queue ! videoscale ! video/x-raw,format=NV12,width=%7,height=%8 ! "
-        "mppjpegenc rc-mode=fixqp q-factor=%9 ! multipartmux boundary=%10 ! "
-        "tcpserversink host=127.0.0.1 port=%11%12 "
-        "t. ! queue ! mpph264enc ! h264parse ! qtmux ! filesink location=%13")
-        .arg(shellQuote(gstLaunchBinary()))
-        .arg(shellQuote(status.devicePath))
-        .arg(status.recordProfile.pixelFormat)
-        .arg(status.recordProfile.width)
-        .arg(status.recordProfile.height)
-        .arg(status.recordProfile.fps > 0 ? status.recordProfile.fps : 30)
-        .arg(status.previewProfile.width)
-        .arg(status.previewProfile.height)
-        .arg(kPreviewJpegQuality)
-        .arg(previewBoundaryForCamera(status.cameraId))
-        .arg(previewPortForCamera(status.cameraId))
-        .arg(analysisTap)
-        .arg(shellQuote(outputPath));
+    return commandBuilder_.buildRecordingCommand(status, outputPath, analysisTapEnabled(status));
 }
 
 QString GstreamerVideoPipelineBackend::buildSnapshotCommand(
     const VideoChannelStatus &status, const QString &outputPath) const {
-    return QStringLiteral(
-        "%1 -q -e v4l2src device=%2 num-buffers=1 ! "
-        "video/x-raw,format=%3,width=%4,height=%5 ! mppjpegenc ! filesink location=%6")
-        .arg(shellQuote(gstLaunchBinary()))
-        .arg(shellQuote(status.devicePath))
-        .arg(status.snapshotProfile.pixelFormat)
-        .arg(status.snapshotProfile.width)
-        .arg(status.snapshotProfile.height)
-        .arg(shellQuote(outputPath));
+    return commandBuilder_.buildSnapshotCommand(status, outputPath);
 }
 
 QString GstreamerVideoPipelineBackend::buildPreviewStreamRecordingCommand(
     const QString &previewUrl, const QString &outputPath, QString *error) const {
-    QString host;
-    QString boundary;
-    quint16 port = 0;
-    if (!configurePreviewStream(previewUrl, &host, &port, &boundary, error)) {
-        return QString();
-    }
-
-    return QStringLiteral(
-        "%1 -q -e tcpclientsrc host=%2 port=%3 ! "
-        "\"multipart/x-mixed-replace,boundary=%4\" ! multipartdemux single-stream=true ! "
-        "jpegparse ! jpegdec ! videoconvert ! "
-        "mpph264enc ! h264parse ! qtmux ! filesink location=%5")
-        .arg(shellQuote(gstLaunchBinary()))
-        .arg(shellQuote(host))
-        .arg(port)
-        .arg(boundary)
-        .arg(shellQuote(outputPath));
+    return commandBuilder_.buildPreviewStreamRecordingCommand(previewUrl, outputPath, error);
 }
 
 void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraId) {
@@ -796,7 +420,7 @@ void GstreamerVideoPipelineBackend::processAnalysisStdout(const QString &cameraI
         return;
     }
 
-    ActivePipeline &pipeline = pipelines_[cameraId];
+    PipelineSession &pipeline = pipelines_[cameraId];
     if (!pipeline.process || pipeline.analysisInputFrameBytes <= 0) {
         if (pipeline.process) {
             pipeline.process->readAllStandardOutput();
@@ -819,103 +443,8 @@ bool GstreamerVideoPipelineBackend::processAnalysisFrameDma(
         return false;
     }
 
-    ActivePipeline &pipeline = pipelines_[cameraId];
-    if (pipeline.analysisInputFrameBytes <= 0
-        || pipeline.analysisConvertBackend != AnalysisConvertBackend::Rga
-        || !runtimeConfig_.analysis.rgaOutputDmabuf) {
-        return false;
-    }
-
-    AnalysisFrameConverter *converter = analysisFrameConverter_
-        ? analysisFrameConverter_
-        : &defaultRgaFrameConverter_;
-    AnalysisDmaBuffer outputBuffer;
-    AnalysisFrameConversionMetadata conversionMetadata;
-    QString convertError;
-    const bool dmaConverted = inputFrame.inputFormat == AnalysisFrameInputFormat::Uyvy
-        ? converter->convertUyvyDmaToRgbDma(inputFrame,
-            pipeline.analysisInputWidth,
-            pipeline.analysisInputHeight,
-            pipeline.analysisOutputWidth,
-            pipeline.analysisOutputHeight,
-            &outputBuffer,
-            &conversionMetadata,
-            &convertError)
-        : converter->convertNv12DmaToRgbDma(inputFrame,
-            pipeline.analysisInputWidth,
-            pipeline.analysisInputHeight,
-            pipeline.analysisOutputWidth,
-            pipeline.analysisOutputHeight,
-            &outputBuffer,
-            &conversionMetadata,
-            &convertError);
-    if (!dmaConverted) {
-        qWarning().noquote()
-            << QStringLiteral("video_runtime camera=%1 event=analysis_dma_input_output_convert_failed error=%2")
-                   .arg(cameraId)
-                   .arg(convertError.isEmpty() ? QStringLiteral("unknown") : convertError);
-        return false;
-    }
-
-    AnalysisFrameDescriptor descriptor;
-    descriptor.frameId = pipeline.nextFrameId++;
-    descriptor.timestampMs = QDateTime::currentMSecsSinceEpoch();
-    descriptor.cameraId = pipeline.cameraId;
-    descriptor.width = pipeline.analysisOutputWidth;
-    descriptor.height = pipeline.analysisOutputHeight;
-    descriptor.pixelFormat = AnalysisPixelFormat::Rgb;
-    descriptor.posePreprocessed = conversionMetadata.posePreprocessed;
-    descriptor.poseXPad = conversionMetadata.poseXPad;
-    descriptor.poseYPad = conversionMetadata.poseYPad;
-    descriptor.poseScale = conversionMetadata.poseScale;
-    descriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
-    descriptor.dmaBufPlaneCount = 1;
-    descriptor.dmaBufOffset = outputBuffer.offset;
-    descriptor.dmaBufStrideBytes = outputBuffer.strideBytes;
-    descriptor.sequence = descriptor.frameId;
-    descriptor.payloadBytes = outputBuffer.payloadBytes;
-
-    analysisFrameSource_->publishDmaBufDescriptor(descriptor, outputBuffer.fd);
-    ::close(outputBuffer.fd);
-
-    bool streamConnected = false;
-    if (auto *outputBackend = dynamic_cast<AnalysisOutputBackend *>(analysisFrameSource_)) {
-        streamConnected = outputBackend->statusForCamera(descriptor.cameraId).streamConnected;
-    }
-    pipeline.logStats.onDescriptorPublished(
-        descriptor.cameraId,
-        pipeline.testInput ? QStringLiteral("test_file") : QStringLiteral("camera"),
-        streamConnected,
-        pipeline.frameRing ? pipeline.frameRing->droppedFrames() : 0,
-        descriptor.timestampMs);
-    if (const auto summary = pipeline.logStats.takeSummaryIfDue(descriptor.timestampMs)) {
-        qInfo().noquote()
-            << QStringLiteral(
-                   "video_perf camera=%1 mode=%2 state=%3 fps=%4 published=%5 dropped_total=%6 dropped_delta=%7 consumers=%8")
-                   .arg(summary->cameraId)
-                   .arg(summary->inputMode)
-                   .arg(pipeline.recording ? QStringLiteral("recording") : QStringLiteral("previewing"))
-                   .arg(QString::number(summary->publishFps, 'f', 1))
-                   .arg(summary->publishedFramesWindow)
-                   .arg(summary->droppedFramesTotal)
-                   .arg(summary->droppedFramesDelta)
-                   .arg(summary->consumerConnected ? 1 : 0);
-    }
-
-    LatencyMarkerWriter marker(runtimeConfig_.debug.videoLatencyMarkerPath);
-    marker.writeEvent(QStringLiteral("analysis_descriptor_published"), descriptor.timestampMs,
-        QJsonObject{
-            {QStringLiteral("camera_id"), descriptor.cameraId},
-            {QStringLiteral("frame_id"), QString::number(descriptor.frameId)},
-            {QStringLiteral("slot_index"), static_cast<int>(descriptor.slotIndex)},
-            {QStringLiteral("sequence"), QString::number(descriptor.sequence)},
-            {QStringLiteral("transport"), QStringLiteral("dmabuf")},
-            {QStringLiteral("rga_input_dmabuf"), true},
-            {QStringLiteral("rga_output_dmabuf"), true},
-            {QStringLiteral("dropped_frames"),
-                static_cast<double>(pipeline.frameRing ? pipeline.frameRing->droppedFrames() : 0)},
-        });
-    return true;
+    PipelineSession &pipeline = pipelines_[cameraId];
+    return analysisFramePublisher_.publishFrameDma(&pipeline, inputFrame);
 }
 
 void GstreamerVideoPipelineBackend::processAnalysisFrameBytes(
@@ -924,251 +453,8 @@ void GstreamerVideoPipelineBackend::processAnalysisFrameBytes(
         return;
     }
 
-    ActivePipeline &pipeline = pipelines_[cameraId];
-    if (pipeline.analysisInputFrameBytes <= 0) {
-        return;
-    }
-
-    QByteArray rgbPayload;
-    AnalysisFrameConversionMetadata conversionMetadata;
-    if (pipeline.analysisConvertBackend == AnalysisConvertBackend::Rga) {
-        AnalysisFrameConverter *converter = analysisFrameConverter_
-            ? analysisFrameConverter_
-            : &defaultRgaFrameConverter_;
-        if (runtimeConfig_.analysis.rgaOutputDmabuf && analysisFrameSource_
-            && analysisFrameSource_->supportsDmaBufFrames()) {
-            AnalysisDmaBuffer dmaBuffer;
-            QString dmaConvertError;
-            const bool dmaOutputConverted = pipeline.analysisInputFormat == AnalysisFrameInputFormat::Uyvy
-                ? converter->convertUyvyToRgbDma(inputFrame,
-                    pipeline.analysisInputWidth,
-                    pipeline.analysisInputHeight,
-                    pipeline.analysisOutputWidth,
-                    pipeline.analysisOutputHeight,
-                    &dmaBuffer,
-                    &conversionMetadata,
-                    &dmaConvertError)
-                : converter->convertNv12ToRgbDma(inputFrame,
-                    pipeline.analysisInputWidth,
-                    pipeline.analysisInputHeight,
-                    pipeline.analysisOutputWidth,
-                    pipeline.analysisOutputHeight,
-                    &dmaBuffer,
-                    &conversionMetadata,
-                    &dmaConvertError);
-            if (dmaOutputConverted) {
-                AnalysisFrameDescriptor descriptor;
-                descriptor.frameId = pipeline.nextFrameId++;
-                descriptor.timestampMs = QDateTime::currentMSecsSinceEpoch();
-                descriptor.cameraId = pipeline.cameraId;
-                descriptor.width = pipeline.analysisOutputWidth;
-                descriptor.height = pipeline.analysisOutputHeight;
-                descriptor.pixelFormat = AnalysisPixelFormat::Rgb;
-                descriptor.posePreprocessed = conversionMetadata.posePreprocessed;
-                descriptor.poseXPad = conversionMetadata.poseXPad;
-                descriptor.poseYPad = conversionMetadata.poseYPad;
-                descriptor.poseScale = conversionMetadata.poseScale;
-                descriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
-                descriptor.dmaBufPlaneCount = 1;
-                descriptor.dmaBufOffset = dmaBuffer.offset;
-                descriptor.dmaBufStrideBytes = dmaBuffer.strideBytes;
-                descriptor.sequence = descriptor.frameId;
-                descriptor.payloadBytes = dmaBuffer.payloadBytes;
-
-                analysisFrameSource_->publishDmaBufDescriptor(descriptor, dmaBuffer.fd);
-                ::close(dmaBuffer.fd);
-
-                bool streamConnected = false;
-                if (auto *outputBackend = dynamic_cast<AnalysisOutputBackend *>(analysisFrameSource_)) {
-                    streamConnected = outputBackend->statusForCamera(descriptor.cameraId).streamConnected;
-                }
-                pipeline.logStats.onDescriptorPublished(
-                    descriptor.cameraId,
-                    pipeline.testInput ? QStringLiteral("test_file") : QStringLiteral("camera"),
-                    streamConnected,
-                    pipeline.frameRing ? pipeline.frameRing->droppedFrames() : 0,
-                    descriptor.timestampMs);
-                if (const auto summary = pipeline.logStats.takeSummaryIfDue(descriptor.timestampMs)) {
-                    qInfo().noquote()
-                        << QStringLiteral(
-                               "video_perf camera=%1 mode=%2 state=%3 fps=%4 published=%5 dropped_total=%6 dropped_delta=%7 consumers=%8")
-                               .arg(summary->cameraId)
-                               .arg(summary->inputMode)
-                               .arg(pipeline.recording ? QStringLiteral("recording")
-                                                       : QStringLiteral("previewing"))
-                               .arg(QString::number(summary->publishFps, 'f', 1))
-                               .arg(summary->publishedFramesWindow)
-                               .arg(summary->droppedFramesTotal)
-                               .arg(summary->droppedFramesDelta)
-                               .arg(summary->consumerConnected ? 1 : 0);
-                }
-
-                LatencyMarkerWriter marker(runtimeConfig_.debug.videoLatencyMarkerPath);
-                marker.writeEvent(QStringLiteral("analysis_descriptor_published"), descriptor.timestampMs,
-                    QJsonObject{
-                        {QStringLiteral("camera_id"), descriptor.cameraId},
-                        {QStringLiteral("frame_id"), QString::number(descriptor.frameId)},
-                        {QStringLiteral("slot_index"), static_cast<int>(descriptor.slotIndex)},
-                        {QStringLiteral("sequence"), QString::number(descriptor.sequence)},
-                        {QStringLiteral("transport"), QStringLiteral("dmabuf")},
-                        {QStringLiteral("rga_output_dmabuf"), true},
-                        {QStringLiteral("dropped_frames"),
-                            static_cast<double>(pipeline.frameRing ? pipeline.frameRing->droppedFrames() : 0)},
-                    });
-                return;
-            }
-            qWarning().noquote()
-                << QStringLiteral("video_runtime camera=%1 event=analysis_dma_output_convert_failed error=%2")
-                       .arg(cameraId)
-                       .arg(dmaConvertError.isEmpty() ? QStringLiteral("unknown") : dmaConvertError);
-        }
-
-        QString convertError;
-        const bool converted = pipeline.analysisInputFormat == AnalysisFrameInputFormat::Uyvy
-            ? converter->convertUyvyToRgb(inputFrame,
-                pipeline.analysisInputWidth,
-                pipeline.analysisInputHeight,
-                pipeline.analysisOutputWidth,
-                pipeline.analysisOutputHeight,
-                &rgbPayload,
-                &conversionMetadata,
-                &convertError)
-            : converter->convertNv12ToRgb(inputFrame,
-                pipeline.analysisInputWidth,
-                pipeline.analysisInputHeight,
-                pipeline.analysisOutputWidth,
-                pipeline.analysisOutputHeight,
-                &rgbPayload,
-                &conversionMetadata,
-                &convertError);
-        if (!converted) {
-            qWarning().noquote()
-                << QStringLiteral("video_runtime camera=%1 event=analysis_convert_failed backend=rga error=%2")
-                       .arg(cameraId)
-                       .arg(convertError.isEmpty() ? QStringLiteral("unknown") : convertError);
-            return;
-        }
-    } else {
-        rgbPayload = inputFrame;
-    }
-
-    if (rgbPayload.size() != pipeline.analysisOutputFrameBytes) {
-        qWarning().noquote()
-            << QStringLiteral("video_runtime camera=%1 event=analysis_frame_size_mismatch expected=%2 actual=%3")
-                   .arg(cameraId)
-                   .arg(pipeline.analysisOutputFrameBytes)
-                   .arg(rgbPayload.size());
-        return;
-    }
-
-    AnalysisFramePacket packet;
-    packet.frameId = pipeline.nextFrameId++;
-    packet.timestampMs = QDateTime::currentMSecsSinceEpoch();
-    packet.cameraId = pipeline.cameraId;
-    packet.width = pipeline.analysisOutputWidth;
-    packet.height = pipeline.analysisOutputHeight;
-    packet.pixelFormat = AnalysisPixelFormat::Rgb;
-    packet.posePreprocessed = conversionMetadata.posePreprocessed;
-    packet.poseXPad = conversionMetadata.poseXPad;
-    packet.poseYPad = conversionMetadata.poseYPad;
-    packet.poseScale = conversionMetadata.poseScale;
-    packet.payload = rgbPayload;
-
-    if (analysisFrameSource_ && analysisFrameSource_->acceptsFrames(packet.cameraId)
-        && pipeline.frameRing) {
-        AnalysisFrameDescriptor descriptor;
-        descriptor.frameId = packet.frameId;
-        descriptor.timestampMs = packet.timestampMs;
-        descriptor.cameraId = packet.cameraId;
-        descriptor.width = packet.width;
-        descriptor.height = packet.height;
-        descriptor.pixelFormat = packet.pixelFormat;
-        descriptor.posePreprocessed = packet.posePreprocessed;
-        descriptor.poseXPad = packet.poseXPad;
-        descriptor.poseYPad = packet.poseYPad;
-        descriptor.poseScale = packet.poseScale;
-        descriptor.payloadBytes = static_cast<quint32>(packet.payload.size());
-
-        bool publishedViaDmaBuf = false;
-        if (analysisFrameSource_->supportsDmaBufFrames()) {
-            QString dmaError;
-            const QString dmaHeapPath = runtimeConfig_.analysis.dmaHeap.trimmed().isEmpty()
-                ? QString::fromLatin1(kDefaultAnalysisDmaHeap)
-                : runtimeConfig_.analysis.dmaHeap.trimmed();
-            const int dmaFd = allocateDmaHeapBuffer(dmaHeapPath, packet.payload.size(), &dmaError);
-            if (dmaFd >= 0 && writePayloadToDmaBuffer(dmaFd, packet.payload, &dmaError)) {
-                descriptor.payloadTransport = AnalysisPayloadTransport::DmaBuf;
-                descriptor.dmaBufPlaneCount = 1;
-                descriptor.dmaBufOffset = 0;
-                descriptor.dmaBufStrideBytes = static_cast<quint32>(packet.width * 3);
-                descriptor.sequence = packet.frameId;
-                analysisFrameSource_->publishDmaBufDescriptor(descriptor, dmaFd);
-                publishedViaDmaBuf = true;
-            } else {
-                qWarning().noquote()
-                    << QStringLiteral("video_runtime camera=%1 event=analysis_dmabuf_publish_failed error=%2")
-                           .arg(cameraId)
-                           .arg(dmaError.isEmpty() ? QStringLiteral("unknown") : dmaError);
-            }
-            if (dmaFd >= 0) {
-                ::close(dmaFd);
-            }
-        }
-
-        if (!publishedViaDmaBuf) {
-            const SharedFramePublishResult publish = pipeline.frameRing->publish(packet);
-            if (publish.sequence == 0) {
-                return;
-            }
-            descriptor.payloadTransport = AnalysisPayloadTransport::SharedMemory;
-            descriptor.dmaBufPlaneCount = 0;
-            descriptor.dmaBufOffset = 0;
-            descriptor.dmaBufStrideBytes = 0;
-            descriptor.slotIndex = publish.slotIndex;
-            descriptor.sequence = publish.sequence;
-            descriptor.payloadBytes = publish.payloadBytes;
-            analysisFrameSource_->publishDescriptor(descriptor);
-        }
-
-        bool streamConnected = false;
-        if (auto *outputBackend = dynamic_cast<AnalysisOutputBackend *>(analysisFrameSource_)) {
-            streamConnected = outputBackend->statusForCamera(packet.cameraId).streamConnected;
-        }
-        pipeline.logStats.onDescriptorPublished(
-            packet.cameraId,
-            pipeline.testInput ? QStringLiteral("test_file") : QStringLiteral("camera"),
-            streamConnected,
-            pipeline.frameRing->droppedFrames(),
-            packet.timestampMs);
-        if (const auto summary = pipeline.logStats.takeSummaryIfDue(packet.timestampMs)) {
-            qInfo().noquote()
-                << QStringLiteral(
-                       "video_perf camera=%1 mode=%2 state=%3 fps=%4 published=%5 dropped_total=%6 dropped_delta=%7 consumers=%8")
-                       .arg(summary->cameraId)
-                       .arg(summary->inputMode)
-                       .arg(pipeline.recording ? QStringLiteral("recording")
-                                               : QStringLiteral("previewing"))
-                       .arg(QString::number(summary->publishFps, 'f', 1))
-                       .arg(summary->publishedFramesWindow)
-                       .arg(summary->droppedFramesTotal)
-                       .arg(summary->droppedFramesDelta)
-                       .arg(summary->consumerConnected ? 1 : 0);
-        }
-
-        LatencyMarkerWriter marker(runtimeConfig_.debug.videoLatencyMarkerPath);
-        marker.writeEvent(QStringLiteral("analysis_descriptor_published"), packet.timestampMs,
-            QJsonObject{
-                {QStringLiteral("camera_id"), packet.cameraId},
-                {QStringLiteral("frame_id"), QString::number(packet.frameId)},
-                {QStringLiteral("slot_index"), static_cast<int>(descriptor.slotIndex)},
-                {QStringLiteral("sequence"), QString::number(descriptor.sequence)},
-                {QStringLiteral("transport"), descriptor.payloadTransport == AnalysisPayloadTransport::DmaBuf
-                        ? QStringLiteral("dmabuf")
-                        : QStringLiteral("shared_memory")},
-                {QStringLiteral("dropped_frames"),
-                    static_cast<double>(pipeline.frameRing->droppedFrames())},
-            });
-    }
+    PipelineSession &pipeline = pipelines_[cameraId];
+    analysisFramePublisher_.publishFrameBytes(&pipeline, inputFrame);
 }
 
 bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const QString &command,
@@ -1186,18 +472,16 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
         return false;
     }
 
-    auto *process = new QProcess();
-    process->setProgram(QStringLiteral("/bin/bash"));
-    process->setArguments({QStringLiteral("-lc"), QStringLiteral("exec %1").arg(command)});
-    process->setProcessChannelMode(QProcess::SeparateChannels);
-    QObject::connect(process,
-        QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-        [this, cameraId, process](int exitCode, QProcess::ExitStatus exitStatus) {
-            if (!pipelines_.contains(cameraId) || pipelines_.value(cameraId).process != process) {
+    const GstProcessRunner::Callbacks callbacks{
+        [this, cameraId]() {
+            processAnalysisStdout(cameraId);
+        },
+        [this, cameraId](int exitCode, QProcess::ExitStatus exitStatus) {
+            if (!pipelines_.contains(cameraId)) {
                 return;
             }
 
-            const ActivePipeline pipeline = pipelines_.take(cameraId);
+            const PipelineSession pipeline = pipelines_.take(cameraId);
             const bool testInput = pipeline.testInput;
             if (pipeline.recordingProcess != nullptr) {
                 QObject::disconnect(pipeline.recordingProcess, nullptr, nullptr, nullptr);
@@ -1212,7 +496,9 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
                 delete pipeline.recordingProcess;
             }
             delete pipeline.frameRing;
-            delete process;
+            if (pipeline.previewRunner) {
+                pipeline.previewRunner->deleteLater();
+            }
 
             if (!observer_) {
                 return;
@@ -1231,32 +517,10 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
                            .arg(QStringLiteral("preview_pipeline_failed"));
                 observer_->onPipelineRuntimeError(cameraId, QStringLiteral("preview_pipeline_failed"));
             }
-        });
-    QObject::connect(process, &QProcess::readyReadStandardOutput, [this, cameraId]() {
-        processAnalysisStdout(cameraId);
-    });
+        },
+    };
 
-    process->start();
-    if (!process->waitForStarted(kStartTimeoutMs)) {
-        if (error) {
-            *error = process->errorString();
-        }
-        delete process;
-        return false;
-    }
-    if (process->waitForFinished(kStartupProbeMs)) {
-        if (error) {
-            const QString startupOutput = QString::fromUtf8(process->readAllStandardError()).trimmed();
-            *error = startupOutput.isEmpty()
-                ? QStringLiteral("pipeline_exited_during_startup")
-                : startupOutput;
-        }
-        delete process;
-        return false;
-    }
-
-    ActivePipeline pipeline;
-    pipeline.process = process;
+    PipelineSession pipeline;
     pipeline.recording = recording;
     pipeline.testInput = command.contains(QStringLiteral("filesrc location="));
     pipeline.previewUrl = previewUrlForCamera(cameraId);
@@ -1289,13 +553,18 @@ bool GstreamerVideoPipelineBackend::startCommand(const QString &cameraId, const 
                 *error = finalError;
             }
             delete pipeline.frameRing;
-            process->kill();
-            process->waitForFinished(kStopTimeoutMs);
-            delete process;
             return false;
         }
     }
+    pipeline.previewRunner = PipelineRunnerFactory(runtimeConfig_).createPreviewRunner(
+        command, QProcess::SeparateChannels, callbacks);
     pipelines_.insert(cameraId, pipeline);
+    if (!pipelines_[cameraId].previewRunner->startPreview(pipelines_[cameraId], error)) {
+        PipelineSession failedPipeline = pipelines_.take(cameraId);
+        delete failedPipeline.frameRing;
+        delete failedPipeline.previewRunner;
+        return false;
+    }
     processAnalysisStdout(cameraId);
 
     qInfo().noquote()
@@ -1327,7 +596,7 @@ bool GstreamerVideoPipelineBackend::startRecordingProcess(
         return false;
     }
 
-    ActivePipeline &pipeline = pipelines_[cameraId];
+    PipelineSession &pipeline = pipelines_[cameraId];
     if (pipeline.recordingProcess != nullptr) {
         if (error) {
             *error = QStringLiteral("already_recording");
@@ -1346,7 +615,7 @@ bool GstreamerVideoPipelineBackend::startRecordingProcess(
                 delete process;
                 return;
             }
-            ActivePipeline &pipeline = pipelines_[cameraId];
+            PipelineSession &pipeline = pipelines_[cameraId];
             if (pipeline.recordingProcess != process) {
                 delete process;
                 return;
@@ -1397,7 +666,7 @@ bool GstreamerVideoPipelineBackend::stopRecordingProcess(const QString &cameraId
         return true;
     }
 
-    ActivePipeline &pipeline = pipelines_[cameraId];
+    PipelineSession &pipeline = pipelines_[cameraId];
     QProcess *process = pipeline.recordingProcess;
     if (process == nullptr) {
         pipeline.recording = false;
@@ -1464,7 +733,7 @@ bool GstreamerVideoPipelineBackend::stopActivePipeline(const QString &cameraId, 
         *error = recordingStopError;
     }
 
-    ActivePipeline pipeline = pipelines_.take(cameraId);
+    PipelineSession pipeline = pipelines_.take(cameraId);
 #if defined(RKAPP_ENABLE_INPROCESS_GSTREAMER) && RKAPP_ENABLE_INPROCESS_GSTREAMER
     if (pipeline.inprocessPipeline) {
         pipeline.inprocessPipeline->stop();
@@ -1475,26 +744,16 @@ bool GstreamerVideoPipelineBackend::stopActivePipeline(const QString &cameraId, 
         return true;
     }
 #endif
-    if (!pipeline.process) {
+    if (!pipeline.previewRunner) {
         delete pipeline.frameRing;
         return true;
     }
 
-    const qint64 processId = pipeline.process->processId();
-    if (processId > 0) {
-        ::kill(static_cast<pid_t>(processId), SIGINT);
-    }
-    if (!pipeline.process->waitForFinished(kStopTimeoutMs)) {
-        pipeline.process->kill();
-        pipeline.process->waitForFinished(kStopTimeoutMs);
-    }
-    if (pipeline.process->state() != QProcess::NotRunning && error) {
-        *error = QStringLiteral("pipeline_stop_failed");
-    }
+    pipeline.previewRunner->stopPreview(pipeline, error);
     qInfo().noquote()
         << QStringLiteral("video_runtime camera=%1 event=preview_stopped").arg(cameraId);
     delete pipeline.frameRing;
-    delete pipeline.process;
+    delete pipeline.previewRunner;
     return error ? error->isEmpty() : true;
 }
 

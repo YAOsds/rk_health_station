@@ -1,7 +1,11 @@
 #pragma once
 
+#include "pipeline/analysis_frame_publisher.h"
+#include "pipeline/dma_buffer_allocator.h"
+#include "pipeline/gst_command_builder.h"
+#include "pipeline/pipeline_session.h"
 #include "pipeline/video_pipeline_backend.h"
-#include "debug/video_runtime_log_stats.h"
+#include "pipeline/preview_stream_reader.h"
 #include "analysis/rga_frame_converter.h"
 #include "runtime_config/app_runtime_config.h"
 
@@ -31,35 +35,6 @@ public:
 private:
     friend class GstreamerVideoPipelineBackendTest;
 
-    enum class AnalysisConvertBackend {
-        GstreamerCpu,
-        Rga,
-    };
-
-    struct ActivePipeline {
-        QProcess *process = nullptr;
-        QProcess *recordingProcess = nullptr;
-#if defined(RKAPP_ENABLE_INPROCESS_GSTREAMER) && RKAPP_ENABLE_INPROCESS_GSTREAMER
-        InprocessGstreamerPipeline *inprocessPipeline = nullptr;
-#endif
-        bool recording = false;
-        bool testInput = false;
-        QString previewUrl;
-        QString cameraId;
-        AnalysisConvertBackend analysisConvertBackend = AnalysisConvertBackend::GstreamerCpu;
-        AnalysisFrameInputFormat analysisInputFormat = AnalysisFrameInputFormat::Nv12;
-        int analysisInputWidth = 0;
-        int analysisInputHeight = 0;
-        int analysisInputFrameBytes = 0;
-        int analysisOutputWidth = 0;
-        int analysisOutputHeight = 0;
-        int analysisOutputFrameBytes = 0;
-        quint64 nextFrameId = 1;
-        QByteArray stdoutBuffer;
-        SharedMemoryFrameRingWriter *frameRing = nullptr;
-        VideoRuntimeLogStats logStats;
-    };
-
     QString gstLaunchBinary() const;
     QString shellQuote(const QString &value) const;
     QString previewUrlForCamera(const QString &cameraId) const;
@@ -84,9 +59,6 @@ private:
     bool startCommand(const QString &cameraId, const QString &command, bool recording,
         QString *previewUrl, QString *error, const VideoProfile &analysisInputProfile = VideoProfile(),
         AnalysisConvertBackend analysisConvertBackend = AnalysisConvertBackend::GstreamerCpu);
-    bool configurePreviewStream(
-        const QString &previewUrl, QString *host, quint16 *port, QString *boundary, QString *error) const;
-    bool readJpegFrameFromPreview(const QString &previewUrl, QByteArray *jpegBytes, QString *error) const;
     bool startRecordingProcess(
         const QString &cameraId, const QString &command, QString *error);
     bool stopRecordingProcess(const QString &cameraId, QString *error);
@@ -94,10 +66,14 @@ private:
     bool stopActivePipeline(const QString &cameraId, QString *error);
     void stopAllPipelines();
 
-    QHash<QString, ActivePipeline> pipelines_;
+    QHash<QString, PipelineSession> pipelines_;
     AppRuntimeConfig runtimeConfig_;
     VideoPipelineObserver *observer_ = nullptr;
     AnalysisFrameSource *analysisFrameSource_ = nullptr;
     AnalysisFrameConverter *analysisFrameConverter_ = nullptr;
     RgaFrameConverter defaultRgaFrameConverter_;
+    GstCommandBuilder commandBuilder_;
+    DmaBufferAllocator dmaBufferAllocator_;
+    PreviewStreamReader previewStreamReader_;
+    AnalysisFramePublisher analysisFramePublisher_;
 };

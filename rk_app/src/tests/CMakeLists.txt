@@ -640,6 +640,17 @@ endif()
 
 add_test(NAME ui_app_dashboard_refresh_test COMMAND ui_app_dashboard_refresh_test)
 
+set(VIDEO_PIPELINE_HELPER_SOURCES
+    ../health_videod/pipeline/analysis_frame_publisher.cpp
+    ../health_videod/pipeline/dma_buffer_allocator.cpp
+    ../health_videod/pipeline/external_gstreamer_runner.cpp
+    ../health_videod/pipeline/gst_command_builder.cpp
+    ../health_videod/pipeline/gst_process_runner.cpp
+    ../health_videod/pipeline/inprocess_launch_description_builder.cpp
+    ../health_videod/pipeline/multipart_jpeg_parser.cpp
+    ../health_videod/pipeline/pipeline_runner_factory.cpp
+    ../health_videod/pipeline/preview_stream_reader.cpp
+)
 
 add_executable(video_runtime_config_integration_test
     video_daemon_tests/video_runtime_config_integration_test.cpp
@@ -652,6 +663,7 @@ add_executable(video_runtime_config_integration_test
     ../health_videod/debug/video_runtime_log_stats.cpp
     ../health_videod/ipc/video_gateway.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
+    ${VIDEO_PIPELINE_HELPER_SOURCES}
 )
 
 set_target_properties(video_runtime_config_integration_test PROPERTIES
@@ -680,6 +692,7 @@ add_executable(video_service_test
     ../health_videod/core/video_storage_service.cpp
     ../health_videod/debug/video_runtime_log_stats.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
+    ${VIDEO_PIPELINE_HELPER_SOURCES}
 )
 
 set_target_properties(video_service_test PROPERTIES
@@ -730,6 +743,7 @@ add_executable(video_service_analysis_test
     ../health_videod/core/video_storage_service.cpp
     ../health_videod/debug/video_runtime_log_stats.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
+    ${VIDEO_PIPELINE_HELPER_SOURCES}
 )
 
 set_target_properties(video_service_analysis_test PROPERTIES
@@ -770,12 +784,57 @@ target_link_libraries(video_runtime_log_stats_test PRIVATE
 
 add_test(NAME video_runtime_log_stats_test COMMAND video_runtime_log_stats_test)
 
+add_executable(gstreamer_pipeline_components_test
+    video_daemon_tests/gstreamer_pipeline_components_test.cpp
+    ${VIDEO_PIPELINE_HELPER_SOURCES}
+    ../health_videod/analysis/shared_memory_frame_ring.cpp
+    ../health_videod/debug/video_runtime_log_stats.cpp
+)
+
+set_target_properties(gstreamer_pipeline_components_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(gstreamer_pipeline_components_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_link_libraries(gstreamer_pipeline_components_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+    ${RK_QT_NETWORK_TARGET}
+)
+
+add_test(NAME gstreamer_pipeline_components_test COMMAND gstreamer_pipeline_components_test)
+
+add_executable(gst_process_runner_test
+    video_daemon_tests/gst_process_runner_test.cpp
+    ../health_videod/pipeline/gst_process_runner.cpp
+)
+
+set_target_properties(gst_process_runner_test PROPERTIES
+    AUTOMOC ON
+)
+
+target_include_directories(gst_process_runner_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../health_videod
+)
+
+target_link_libraries(gst_process_runner_test PRIVATE
+    rk_shared
+    ${RK_QT_TEST_TARGET}
+)
+
+add_test(NAME gst_process_runner_test COMMAND gst_process_runner_test)
+
 add_executable(gstreamer_video_pipeline_backend_test
     video_daemon_tests/gstreamer_video_pipeline_backend_test.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
     ../health_videod/analysis/shared_memory_frame_ring.cpp
     ../health_videod/analysis/rga_frame_converter.cpp
     ../health_videod/debug/video_runtime_log_stats.cpp
+    ${VIDEO_PIPELINE_HELPER_SOURCES}
 )
 
 set_target_properties(gstreamer_video_pipeline_backend_test PROPERTIES
@@ -806,6 +865,10 @@ if(RKAPP_ENABLE_INPROCESS_GSTREAMER)
         gstreamer-allocators-1.0
     )
     target_sources(gstreamer_video_pipeline_backend_test PRIVATE
+        ../health_videod/pipeline/gst_appsink_frame_dispatcher.cpp
+        ../health_videod/pipeline/gst_appsink_frame_dispatcher.h
+        ../health_videod/pipeline/gst_bus_monitor.cpp
+        ../health_videod/pipeline/gst_bus_monitor.h
         ../health_videod/pipeline/inprocess_gstreamer_pipeline.cpp
         ../health_videod/pipeline/inprocess_gstreamer_pipeline.h
     )
@@ -867,6 +930,7 @@ add_executable(video_gateway_test
     ../health_videod/core/video_storage_service.cpp
     ../health_videod/debug/video_runtime_log_stats.cpp
     ../health_videod/pipeline/gstreamer_video_pipeline_backend.cpp
+    ${VIDEO_PIPELINE_HELPER_SOURCES}
 )
 
 set_target_properties(video_gateway_test PROPERTIES
